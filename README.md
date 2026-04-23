@@ -68,7 +68,7 @@ One piece replaced. Every other piece - steward, catalogue, other plugins, brand
 
 ## Status
 
-Early. Foundation is complete; first real engineering starts at Milestone 2.
+Early. Foundation is complete; Milestone 3 (first plugin) is in progress.
 
 **Landed**
 
@@ -78,9 +78,19 @@ Early. Foundation is complete; first real engineering starts at Milestone 2.
 -   [BUILD.md](BUILD.md) - executable runbook, companion to SHOWCASE.
 -   `scripts/` - automation skeleton. `bootstrap.sh` (skeleton that completes as later milestones land), `reset.sh` (fully working today), workstation `Makefile` for cross-compiles.
 
+**In progress**
+
+-   Milestone 3 - `com.volumio.playback.mpd` stocking `audio.playback` (first plugin, first real release). Infrastructure layers landing in sequence:
+    -   Phase 3.0 - crate skeleton, manifest, stub warden. Landed.
+    -   Phase 3.1 - MPD connection layer (protocol stack, status, currentsong). Landed.
+    -   Phase 3.2a - transport commands + idle subprotocol on the connection layer. Landed.
+    -   Phase 3.2b - playback supervisor module (two-task actor with bounded reconnection and TOML state reports). Landed.
+    -   Phase 3.2c - wire the supervisor into the warden trait impls; retire lint suppressions. Pending.
+    -   Phase 3.3 - configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`). Pending.
+    -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Pending.
+
 **Next**
 
--   Milestone 3 - `com.volumio.playback.mpd` stocking `audio.playback` (first plugin, first real release).
 -   Milestone 4 - `com.volumio.artwork.local` stocking `artwork.providers` (second plugin, first multi-piece composition).
 
 `evo-core` is pinned at tag `v0.1.8` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.

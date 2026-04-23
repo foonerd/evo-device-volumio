@@ -3,20 +3,31 @@
 //! MPD playback warden for evo-device-volumio. Stocks the
 //! `audio.playback` shelf declared by Milestone 2's catalogue.
 //!
-//! This is the Milestone 3 Phase 3.0 deliverable: a stub singleton
-//! warden that implements the [`Plugin`] and [`Warden`] trait
-//! surface required for admission and custody lifecycle, with real
-//! MPD connection logic deferred to later phases:
+//! Milestone 3 is landing in phases. The infrastructure modules
+//! (connection layer, playback supervisor) are built out ahead of
+//! the warden trait impls below; those impls remain the Phase 3.0
+//! stub until Phase 3.2c wires the modules into them. Phase
+//! status:
 //!
-//! - Phase 3.1: MPD connection layer (private module, socket and
-//!   protocol plumbing, mock-backed unit tests).
-//! - Phase 3.2: real custody of a live MPD instance (idle events,
-//!   state reports over time, transport course corrections,
-//!   reconnect-on-disconnect).
+//! - Phase 3.0: crate skeleton, manifest, stub Warden impl.
+//!   Landed.
+//! - Phase 3.1: MPD connection layer - private module, socket and
+//!   protocol plumbing, mock-backed unit tests. Landed.
+//! - Phase 3.2a: transport commands (play, pause, stop, next,
+//!   previous, seek, set_volume) and the idle subprotocol on the
+//!   connection layer. Landed.
+//! - Phase 3.2b: playback supervisor module - two tokio tasks
+//!   orchestrating command + idle connections with bounded
+//!   reconnection and TOML state reports. Landed.
+//! - Phase 3.2c: wire the supervisor into the [`Warden`] trait
+//!   impls below and retire the dead_code / unused_imports
+//!   suppressions inside `mpd.rs` and `playback_supervisor.rs`.
+//!   Pending.
 //! - Phase 3.3: configuration file (`/etc/evo/plugins.d/
-//!   com.volumio.playback.mpd.toml`).
+//!   com.volumio.playback.mpd.toml`). Pending.
 //! - Phase 3.4: subject assertion (`track` and `album` with
-//!   `album_of` edges for M4's album-art respondent to walk).
+//!   `album_of` edges for Milestone 4's album-art respondent to
+//!   walk). Pending.
 //!
 //! The wire-transport binary lands after the in-process flow has
 //! stabilised.
@@ -29,10 +40,15 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-// MPD connection layer (Phase 3.1). Self-contained module; the
-// dead_code / unused_imports suppressions it needs during Phase 3.1
-// live at its own root and retire with Phase 3.2.
+// MPD connection layer (Phase 3.1 + 3.2a). Self-contained module;
+// dead_code / unused_imports suppressions live at its own root and
+// retire with Phase 3.2c.
 mod mpd;
+
+// Playback supervisor (Phase 3.2b). Self-contained module;
+// dead_code / unused_imports suppressions live at its own root and
+// retire with Phase 3.2c's warden wiring.
+mod playback_supervisor;
 
 use evo_plugin_sdk::contract::{
     Assignment, BuildInfo, CourseCorrection, CustodyHandle, HealthReport,
@@ -165,7 +181,7 @@ impl Plugin for MpdPlaybackPlugin {
                 "plugin unload"
             );
             self.loaded = false;
-            // Phase 3.0 does not emit final state reports; Phase 3.2
+            // Phase 3.0 does not emit final state reports; Phase 3.2c
             // will, once the reporter is retained on TrackedCustody.
             self.custodies.clear();
             Ok(())
@@ -208,7 +224,7 @@ impl Warden for MpdPlaybackPlugin {
             // method - same task as the SDK's host dispatch loop -
             // so no cross-task reporter sharing. Matches the pattern
             // in evo-example-warden. Failure to report is not fatal
-            // to the custody in Phase 3.0; Phase 3.2 may reconsider
+            // to the custody in Phase 3.0; Phase 3.2c may reconsider
             // when reporting is no longer a best-effort signal.
             let report = assignment
                 .custody_state_reporter
@@ -276,9 +292,10 @@ impl Warden for MpdPlaybackPlugin {
                 "course correction accepted"
             );
 
-            // Phase 3.2 will act on the correction (play, pause,
+            // Phase 3.2c will act on the correction (play, pause,
             // stop, next, prev, seek) and emit a follow-up state
-            // report. Phase 3.0 acknowledges without effect.
+            // report via the supervisor. Phase 3.0 acknowledges
+            // without effect.
             Ok(())
         }
     }
