@@ -13,14 +13,17 @@ Two readers:
 
 Scope: workstation-side build, signing, publishing to the artefacts repo, placing bytes on a Pi, running, verifying, updating, promoting. Not in scope: plugin internals (see each plugin crate's docs), the fabric concept (see `SHOWCASE.md` and `evo-core` engineering docs), contributor workflow on the source tree (see `DEVELOPING.md`).
 
-Sections 5-10 describe the procedure at STEADY STATE - what this looks like once the plugin set exists, workflows run, and the artefact plane is populated. Section 2 states honestly what is executable TODAY and which milestone unlocks the rest.
+The procedure is automated through the scripts in `scripts/`. Section 3 names them; sections 6-11 document what each script does under the hood so a reader understands the mechanics and can act manually when automation is unavailable. Section 2 states honestly what is executable today and which milestone unlocks the rest.
 
 ## 2. Today's state
 
 As of Milestone 1 + Milestone 0 (SHOWCASE.md), the source repo is scaffolded and the conceptual foundation is documented. What is actually executable today:
 
 -   Clone this repo, run `cargo build --workspace`. Succeeds trivially; the workspace has no members yet.
--   Clone `evo-core` at tag `v0.1.7`, cross-compile the steward binary for aarch64.
+-   Clone `evo-core` at tag `v0.1.7`, cross-compile the steward binary for aarch64 (manually, or via `make build-steward` from `scripts/workstation/`).
+-   On a freshly-flashed Pi, run `sudo scripts/device/bootstrap.sh` to create the evo filesystem footprint and install a vendor public key (if supplied via `--trust-key`). The script's later phases (fetch manifest, verify, place pieces, install systemd unit) are marked pending and arrive as later milestones land.
+-   On a Pi, run `sudo scripts/device/reset.sh` to wipe the evo footprint cleanly. Useful during iteration; avoids re-flashing the SD card.
+-   On the workstation, `make -C scripts/workstation help` lists available build targets.
 
 What is NOT yet executable, and which milestone unlocks it:
 
@@ -29,13 +32,49 @@ What is NOT yet executable, and which milestone unlocks it:
 -   **A second plugin to exercise multi-piece composition** - Milestone 4.
 -   **Continuous-dev, manual-build, and promotion workflows under `.github/workflows/`** - authored alongside Milestone 3 when there is a first piece to publish.
 -   **The artefact manifest format on the artefacts repo** - authored when the first workflow writes one.
--   **The on-device update tool (CHECK / OFFER / APPLY)** - authored when devices exist to update.
+-   **The on-device update script `scripts/device/update.sh` (CHECK / OFFER / APPLY)** - authored when the manifest exists and pieces exist to update.
 -   **Signing tool and vendor key management** - decided when the first signature is cut.
 -   **The systemd unit, packaged config examples, trust-material layout** - authored when there is enough to install.
 
-Read sections 3-12 for the shape of the full procedure. Execute only the subset section 2 names as available.
+Read sections 3-13 for the shape of the full procedure and the automation that drives it. Execute only the subset listed above today.
 
-## 3. Prerequisites: workstation
+## 3. Automation
+
+The primary path through this runbook is automated. The manual prose in sections 7-11 is documentation of what the automation does, not a list of commands a human types during daily use.
+
+Three families of automation exist. Each has one concern.
+
+### 3.1 Device-side scripts
+
+Run on the Pi. Source under `scripts/device/` in this repository. Shipped to devices as pieces on the artefact plane once the first release cuts.
+
+-   `bootstrap.sh` - blank Pi to running evo service, one command. Takes a channel as input. Absorbs sections 7.1 through 7.10.
+    Today: skeleton. Phase 4 (footprint creation) runs fully; phase 5 (trust material install) runs when `--trust-key` is passed; phases 3 and 6 onward print PENDING markers naming what each needs.
+-   `reset.sh` - wipes the evo footprint cleanly. Optional `--keep-policy` preserves `/etc/evo`. Removes the systemd unit if present.
+    Today: fully working. Safe to run on a Pi that has no evo installed (phases skip cleanly).
+-   `update.sh` - CHECK / OFFER / APPLY on a running device. Absorbs sections 9, 10.
+    Today: pending. Arrives with the on-device update tool concept (see section 14); depends on the manifest format and the local inventory.
+
+### 3.2 Workstation-side scripts
+
+Run by a developer on the workstation. Source under `scripts/workstation/`.
+
+-   `Makefile` - wrappers around `cross build` for the plugin workspace and for the `evo-core` steward at the pinned tag. Targets: `help`, `check-env`, `build-plugins`, `build-steward`, `build-all`.
+    Today: working skeleton. `build-plugins` succeeds trivially (no workspace members yet); `build-steward` builds the steward binary from a local `evo-core` clone; `check-env` validates `cross`, `git`, and the evo-core path.
+
+### 3.3 Workflow scripts
+
+Run by GitHub Actions on the source repo. Source under `.github/workflows/` (absent today; lands with Milestone 3).
+
+-   Continuous dev, manual build, promotion. Shape described in `SHOWCASE.md` section 7. The promotion workflow is a metadata-only pointer move; no rebuild.
+
+### 3.4 Trust posture of the automation itself
+
+Scripts are pieces. They get signed like any other piece once the broader signing discipline is in place. A device that runs an unsigned `bootstrap.sh` fetched over the network has a trust hole the rest of the architecture tries to close; bootstrap's first real job (once the artefact plane exists) is to establish trust before executing anything it fetched.
+
+Today the scripts live only in the source repo and are copied onto the device by the developer during bring-up. Signature discipline for scripts is deferred until the broader signing tool and key management are chosen (see section 14).
+
+## 4. Prerequisites: workstation
 
 A Linux or macOS machine is the easiest path. Windows works via WSL2.
 
@@ -53,7 +92,7 @@ Required software:
     ```
     `cross` requires Docker or Podman installed and running.
 -   `ssh` and `scp` (or `rsync`). For placing bytes on the Pi.
--   A signing tool and the vendor's private signing key. Exact tool deferred (see section 13).
+-   A signing tool and the vendor's private signing key. Exact tool deferred (see section 14).
 
 Clone the three repos to a shared parent directory:
 
@@ -64,7 +103,7 @@ git clone https://github.com/foonerd/evo-device-volumio.git
 git clone https://github.com/foonerd/evo-device-volumio-artefacts.git
 ```
 
-## 4. Prerequisites: target Pi
+## 5. Prerequisites: target Pi
 
 Hardware: any Raspberry Pi with aarch64 support. Pi 4 or Pi 5 for comfort during bring-up. Pi Zero 2 W is supported; the device never builds its own software, so its modest CPU is not a blocker.
 
@@ -84,17 +123,25 @@ OS install, once, via Raspberry Pi Imager on your workstation:
     ssh <user>@<hostname>.local
     ```
 
-No evo-specific preparation on the Pi yet. That happens in section 6.
+No evo-specific preparation on the Pi yet. That happens in section 7.
 
-## 5. Build procedure (workstation)
+## 6. Build procedure (workstation)
 
 Performed on the workstation. Inputs: `evo-core` at the pinned tag, `evo-device-volumio` source. Outputs: signed artefacts published to `evo-device-volumio-artefacts` on the chosen channel.
 
-### 5.1 Verify the pin
+Primary path (once plugin crates exist):
 
-The distribution's `Cargo.toml` declares `evo-plugin-sdk` via a git tag (currently `v0.1.7`). The steward binary must be built from the same tag (step 5.3). Check both match.
+```
+make -C scripts/workstation build-all
+```
 
-### 5.2 Cross-compile plugins
+The manual equivalent, with commentary, follows.
+
+### 6.1 Verify the pin
+
+The distribution's `Cargo.toml` declares `evo-plugin-sdk` via a git tag (currently `v0.1.7`). The steward binary must be built from the same tag (step 6.3). Check both match.
+
+### 6.2 Cross-compile plugins
 
 From the distribution's source repo:
 
@@ -105,7 +152,9 @@ cross build --release --target aarch64-unknown-linux-gnu --workspace
 
 Outputs land in `target/aarch64-unknown-linux-gnu/release/`. One binary per plugin crate.
 
-### 5.3 Cross-compile the steward
+Equivalent: `make -C scripts/workstation build-plugins`.
+
+### 6.3 Cross-compile the steward
 
 From the `evo-core` clone, at the pinned tag:
 
@@ -117,7 +166,9 @@ cross build --release --target aarch64-unknown-linux-gnu -p evo
 
 Output: `target/aarch64-unknown-linux-gnu/release/evo`.
 
-### 5.4 Assemble the piece set
+Equivalent: `make -C scripts/workstation build-steward`.
+
+### 6.4 Assemble the piece set
 
 For each piece (the steward, each plugin, the catalogue, branding, public trust material), collect:
 
@@ -126,21 +177,21 @@ For each piece (the steward, each plugin, the catalogue, branding, public trust 
 -   Its version string.
 -   Its SHA-256 digest.
 
-### 5.5 Sign
+### 6.5 Sign
 
-Produce a detached signature per piece using the vendor's private signing key. The signature asserts "this version was produced by the vendor and has not been tampered with". Specific tool and format deferred (see section 13 and `SHOWCASE.md` section 10).
+Produce a detached signature per piece using the vendor's private signing key. The signature asserts "this version was produced by the vendor and has not been tampered with". Specific tool and format deferred (see section 14 and `SHOWCASE.md` section 10).
 
-### 5.6 Write the artefact manifest
+### 6.6 Write the artefact manifest
 
 A single file on the artefacts repo that names every piece, version, path, digest, signature, Debian dependencies, and per-channel pointers (which version is currently on `dev` / `test` / `prod`). Signed with the vendor's key. Carries a freshness timestamp.
 
-Format deferred; see section 13.
+Format deferred; see section 14.
 
-### 5.7 Publish to the artefacts repo
+### 6.7 Publish to the artefacts repo
 
 Copy the signed artefacts and the signed manifest into the `evo-device-volumio-artefacts` working copy, at the path the manifest declares. Commit. Push.
 
-### 5.8 (Alternative) Workflow-driven
+### 6.8 (Alternative) Workflow-driven
 
 The above is what a human does by hand during bring-up. At steady state the three workflows in `.github/workflows/` do it:
 
@@ -150,11 +201,15 @@ The above is what a human does by hand during bring-up. At steady state the thre
 
 See `SHOWCASE.md` section 7 for the workflow shapes.
 
-## 6. First install on the target
+## 7. First install on the target
 
-Performed on the Pi, over SSH, when a full artefact set exists to install. Pre-Milestone-3 this section is unexecutable; read it for shape.
+Performed on the Pi over SSH.
 
-### 6.1 Install Population A (Debian runtime dependencies)
+**Primary path:** `sudo scripts/device/bootstrap.sh --channel <channel> --trust-key <path>`. The script absorbs the phases below. The steps document what the script does phase by phase; run them by hand only if you need to debug a specific phase or the script is unavailable.
+
+Pre-Milestone-3 the later phases are incomplete; see section 2.
+
+### 7.1 Install Population A (Debian runtime dependencies)
 
 Each plugin manifest declares its Debian dependencies. At install time these are aggregated across the selected plugin set and handed to apt with `--no-install-recommends` to avoid littering.
 
@@ -165,7 +220,7 @@ sudo apt install --no-install-recommends <aggregated-dep-list>
 
 The exact dependency list grows milestone by milestone. At Milestone 3 (MPD playback warden): `mpd`, `alsa-utils`, and whatever else the MPD plugin declares. At Milestone 4 and beyond: union with each new plugin's declarations.
 
-### 6.2 Create the evo filesystem footprint
+### 7.2 Create the evo filesystem footprint
 
 Per `evo-core/docs/engineering/BOUNDARY.md` section 9:
 
@@ -178,7 +233,7 @@ sudo mkdir -p /var/lib/evo/state /var/lib/evo/cache
 
 Ownership and permissions per the distribution's service-user decision (deferred).
 
-### 6.3 Install the vendor's public trust material
+### 7.3 Install the vendor's public trust material
 
 ```
 sudo cp <vendor-public-key> /opt/evo/trust/
@@ -186,19 +241,19 @@ sudo cp <vendor-public-key> /opt/evo/trust/
 
 The trust material is bundled with the distribution and is what every subsequent signature verification checks against.
 
-### 6.4 Fetch the manifest
+### 7.4 Fetch the manifest
 
 ```
 curl -o /tmp/manifest <manifest-url-on-artefacts-repo>
 ```
 
-URL shape deferred (see section 13).
+URL shape deferred (see section 14).
 
-### 6.5 Verify the manifest signature
+### 7.5 Verify the manifest signature
 
 Against `/opt/evo/trust/`. If verification fails, stop; do not fetch artefacts.
 
-### 6.6 Fetch and verify each piece
+### 7.6 Fetch and verify each piece
 
 For each piece named in the manifest:
 
@@ -206,14 +261,14 @@ For each piece named in the manifest:
 -   Verify the signature against the vendor key.
 -   Fail fast on any mismatch.
 
-### 6.7 Place artefacts into the footprint
+### 7.7 Place artefacts into the footprint
 
 -   Steward: `/opt/evo/bin/evo`.
 -   Plugins: `/opt/evo/plugins/<reverse-dns-name>/` (one directory per plugin; contains binary + manifest).
 -   Catalogue: `/opt/evo/catalogue/volumio.toml`.
 -   Branding: `/opt/evo/share/branding/`.
 
-### 6.8 Seed configuration
+### 7.8 Seed configuration
 
 ```
 sudo cp /opt/evo/share/examples/evo.toml.example /etc/evo/evo.toml
@@ -222,7 +277,7 @@ sudo cp /opt/evo/share/examples/plugins.d/*.toml /etc/evo/plugins.d/
 
 Edit `/etc/evo/evo.toml` and any plugin configs for this device's specifics (hardware strings, paths, etc.).
 
-### 6.9 Install the systemd unit
+### 7.9 Install the systemd unit
 
 ```
 sudo cp /opt/evo/share/systemd/evo.service /etc/systemd/system/
@@ -230,7 +285,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now evo
 ```
 
-### 6.10 Verify
+### 7.10 Verify
 
 ```
 systemctl status evo
@@ -240,17 +295,17 @@ ls -la /var/run/evo/
 
 Expected: steward active, catalogue loaded, plugins admitted, socket bound.
 
-## 7. Updating a configuration parameter
+## 8. Updating a configuration parameter
 
-Canonical tiny change: an ALSA device string was wrong (`wh:0,0`), fix to `hw:0,0`. Zero rebuild. One config file edit. One reload.
+Canonical tiny change: an ALSA device string was wrong (`wh:0,0`), fix to `hw:0,0`. Zero rebuild. One config file edit. One reload. Remains a manual operation - it is simpler than any automation would add.
 
-### 7.1 Edit the config on the Pi
+### 8.1 Edit the config on the Pi
 
 ```
 sudo $EDITOR /etc/evo/plugins.d/com.volumio.playback.mpd.toml
 ```
 
-### 7.2 Ask the plugin to reload
+### 8.2 Ask the plugin to reload
 
 Depends on the plugin's declared `hot_reload` policy in its manifest (`evo-core/docs/engineering/PLUGIN_PACKAGING.md` section 2):
 
@@ -260,43 +315,45 @@ Depends on the plugin's declared `hot_reload` policy in its manifest (`evo-core/
 
 The exact per-plugin reload tool is deferred; today the `none` path (service restart) works for any plugin.
 
-### 7.3 Verify
+### 8.3 Verify
 
 `journalctl -u evo` shows the plugin loaded the new config.
 
 No rebuild. No transfer. No other piece touched.
 
-## 8. Updating a single plugin
+## 9. Updating a single plugin
 
 Canonical case: a bug in `com.volumio.playback.mpd`.
 
-### 8.1 Fix on the source repo
+**Primary path (once available):** `sudo scripts/device/update.sh`. The script performs the three-phase CHECK / OFFER / APPLY operation. The steps below document what the tool does; today, with the tool pending, they describe the future shape.
+
+### 9.1 Fix on the source repo
 
 Edit the plugin source, commit, push.
 
-### 8.2 Continuous-dev workflow builds and publishes
+### 9.2 Continuous-dev workflow builds and publishes
 
 On push, the continuous-dev workflow cross-compiles the affected plugin, signs it, publishes it to the `dev` channel on the artefacts repo. The manifest's `dev` pointer for this plugin moves to the new version.
 
 Alternative: dispatch the manual-build workflow against a specific git ref and channel.
 
-### 8.3 Apply on the target
-
-The operator runs the update tool on the Pi (tool TBD). The tool performs the three-phase operation from `SHOWCASE.md`:
+### 9.3 Apply on the target
 
 -   CHECK: fetches the current manifest, diffs against local inventory, finds the new version for this plugin.
 -   OFFER: displays the diff with changelog, awaits operator confirmation.
 -   APPLY: fetches the new artefact, verifies signature, places into `/opt/evo/plugins/com.volumio.playback.mpd/`, honours the plugin's `hot_reload` policy.
 
-### 8.4 Verify
+### 9.4 Verify
 
 `journalctl -u evo` shows the plugin loaded the new version. Every other piece is untouched.
 
-## 9. Updating the steward
+## 10. Updating the steward
 
 Canonical case: `evo-core` v0.2.0 is tagged.
 
-### 9.1 Update the pin
+**Primary path (once available):** same `sudo scripts/device/update.sh` as section 9. The steward is a piece like any other on the artefact plane; only the size of the diff differs (plugins are co-updated because they share the SDK version).
+
+### 10.1 Update the pin
 
 On the source repo, edit `Cargo.toml`:
 
@@ -306,25 +363,27 @@ evo-plugin-sdk = { git = "...", tag = "v0.2.0", version = "0.2.0" }
 
 Verify plugin crates still compile against the new SDK: `cargo build --workspace`. Address any API changes.
 
-### 9.2 Rebuild
+### 10.2 Rebuild
 
 The continuous-dev or manual-build workflow cross-compiles the new steward (from the new `evo-core` tag) and all plugins (they are recompiled against the new SDK). Publish to the chosen channel.
 
-### 9.3 Apply on the target
+### 10.3 Apply on the target
 
-Same CHECK / OFFER / APPLY flow. The diff now contains the steward plus every plugin; operator confirms the set.
+Same CHECK / OFFER / APPLY flow as section 9. The diff now contains the steward plus every plugin; operator confirms the set.
 
-### 9.4 Verify
+### 10.4 Verify
 
-As in section 6.10.
+As in section 7.10.
 
 A steward bump is a wider update than a single plugin because every plugin is linked against the SDK version. It is still piece-granular on the artefact plane; only the diff is wider.
 
-## 10. Promoting a version between channels
+## 11. Promoting a version between channels
 
 Canonical case: `com.volumio.playback.mpd` v0.3.2 has proved itself on `dev`; promote to `test`. Later, to `prod`.
 
-### 10.1 Dispatch the promotion workflow
+Promotion runs on the source repo's Actions surface, not on a device. No device-side script.
+
+### 11.1 Dispatch the promotion workflow
 
 From the source repo's Actions tab, dispatch the promotion workflow with inputs:
 
@@ -334,19 +393,19 @@ version     = 0.3.2
 destination = test
 ```
 
-### 10.2 Workflow edits the manifest
+### 11.2 Workflow edits the manifest
 
 The workflow commits a manifest change to the artefacts repo: the `test` channel pointer for this plugin now names version 0.3.2. The manifest is re-signed. NO REBUILD. NO NEW ARTEFACT.
 
-### 10.3 Devices on `test` pick up
+### 11.3 Devices on `test` pick up
 
 On next CHECK, devices tracking `test` for this plugin see the new pointer and proceed through OFFER / APPLY. The bytes they fetch are bit-identical to what `dev`-tracking devices already have.
 
-### 10.4 Rollback
+### 11.4 Rollback
 
 Dispatch the promotion workflow again, naming the previous version. Pointer moves back. No rebuild. This is the architectural payoff of "signatures on versions, pointers on channels".
 
-## 11. Verification checklist
+## 12. Verification checklist
 
 Used after any install or major update:
 
@@ -357,7 +416,7 @@ Used after any install or major update:
 -   [ ] A probe client (see `evo-core/README.md` sixty-seconds example) can connect and receive a response.
 -   [ ] Minimum behaviour demonstrable: TBD at Milestone 3 once the MPD warden lands. For now: the steward admits zero plugins and serves the empty catalogue cleanly.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 Minimal initial set. Grows with real operational experience.
 
@@ -366,8 +425,9 @@ Minimal initial set. Grows with real operational experience.
 -   **Signature verification fails**: check `/opt/evo/trust/` and `/etc/evo/trust.d/` contain the vendor public key that signed the artefact. Key rotation invalidates old signatures.
 -   **`cross build` fails with Docker errors on the workstation**: confirm Docker or Podman is running. `cross` spawns a container per build.
 -   **Pi OOMs during a cargo build**: the Pi is the device, not the build machine. Build on the workstation and ship artefacts.
+-   **`bootstrap.sh` prints PENDING markers**: expected. Sections of the script depend on later milestones. See section 2.
 
-## 13. Deferred items tracked here
+## 14. Deferred items tracked here
 
 Named so their absence is visible and a future change to this document can close them by pointing back here:
 
@@ -376,11 +436,12 @@ Named so their absence is visible and a future change to this document can close
 -   The artefact manifest file format (fields, serialisation, freshness window semantics).
 -   The path layout within `evo-device-volumio-artefacts` (per-channel directories, per-version filenames, manifest location).
 -   The URL shape a device fetches the manifest from.
--   The on-device update tool that performs CHECK / OFFER / APPLY.
+-   The on-device update script `scripts/device/update.sh` (CHECK / OFFER / APPLY).
 -   The per-plugin reload mechanism accessible without restarting the steward.
 -   The service user for the steward and associated file ownership.
 -   The full aggregated Debian dependency list (grows with each plugin milestone).
 -   The systemd unit file contents.
 -   Concrete verification procedure for the POC minimum (depends on Milestones 2-4).
+-   Signing discipline for the automation scripts themselves.
 
 Each item resolves in a specific later milestone. Cross-references will land in-place as they do.
