@@ -68,7 +68,7 @@ One piece replaced. Every other piece - steward, catalogue, other plugins, brand
 
 ## Status
 
-Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The warden now drives a real MPD instance end-to-end; remaining phases add configuration and subject assertion before the first signed release.
+Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The warden drives a real MPD instance end-to-end with operator configuration support; the remaining phase asserts `track` and `album` subjects before the first signed release.
 
 **Landed**
 
@@ -86,7 +86,7 @@ Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The wa
     -   Phase 3.2a - transport commands + idle subprotocol on the connection layer. Landed.
     -   Phase 3.2b - playback supervisor module (two-task actor with bounded reconnection and TOML state reports). Landed.
     -   Phase 3.2c - supervisor wired into the warden trait impls; course-correction payload encoding and `PlaybackError` -> `PluginError` classification in place; lint suppressions retired. Landed.
-    -   Phase 3.3 - configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`). Pending.
+    -   Phase 3.3 - operator configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`) parsed via `LoadContext::config`; endpoint and timeouts overridable; validated `ConfigError` hierarchy. Landed.
     -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Pending.
 
 **Next**
