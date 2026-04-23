@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = []
+
+# Workspace members will be added as milestones land:
+#   Milestone 3: the MPD playback warden (com.volumio.playback.mpd).
+#   Milestone 4: the album-art respondent (com.volumio.artwork.local).
+#   Later milestones: the remaining plugins per the volumio-evo-concept.md mapping.
+#
+# Plugin crates will live under plugins/ and be added to the members array.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+repository = "https://github.com/foonerd/evo-device-volumio"
+
+# Single pin for the evo framework. Every plugin crate consumes the SDK via
+# `evo-plugin-sdk = { workspace = true }` so there is exactly one place to
+# bump the version. Pin is intentional; do not track evo-core main silently.
+# Upgrade procedure is documented in DEVELOPING.md.
+[workspace.dependencies]
+evo-plugin-sdk = { git = "https://github.com/foonerd/evo-core.git", tag = "v0.1.7", version = "0.1.7" }
+semver = { version = "1", features = ["serde"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+anyhow = "1"
+
+# Mirrors evo-core's workspace lints. No unsafe; all public items documented.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
