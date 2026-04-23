@@ -1,46 +1,105 @@
 # evo-device-volumio
 
-The first distribution of [evo-core](https://github.com/foonerd/evo-core): a brand-neutral steward fabric for appliance-class devices.
+> The first distribution of [evo-core](https://github.com/foonerd/evo-core). An audio player built as a fabric of independently versioned pieces, not a monolith.
 
-This repository is Volumio's device-facing concerns - catalogue, plugin set, branding, frontend integration, packaging - layered on top of evo-core's steward. It is both the first production evo distribution and a concept-showcase reference implementation for distributions that follow.
+Stock the plugins. Sign the pieces. The device composes.
 
-## What is this
+A typo in an ALSA parameter is a one-line config edit, not a redeploy. A bug in playback is a one-plugin rebuild, not a firmware flash. A core bump is a deliberate act, not a surprise. This repository is what makes that possible for the Volumio-branded audio domain, and - because the evo fabric is domain-neutral - it is also a worked example for every evo distribution that comes after it.
 
-Evo-core is the framework: a single long-running process that administers a declared catalogue, admits plugins that stock its slots, reconciles subject identities, and emits projections and happenings to any consumer that looks. Evo-core knows nothing about audio, networking, services, or hardware.
+## How it fits together
 
-This repository is the distribution: everything that names an actual service, protocol, or piece of hardware. MPD playback. ALSA output. Album-art providers. Metadata providers. NetworkManager integration. NAS mount orchestration. Samba sharing. Kiosk surface. Boot branding. Alarm clocks. All of it ships here as plugins that stock slots declared by a catalogue that also ships here.
+```mermaid
+flowchart LR
+    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.7)"]
+    src["<b>evo-device-volumio</b><br/><i>this repo</i><br/>catalogue + plugins + branding"]
+    art["<b>evo-device-volumio-artefacts</b><br/><i>release plane</i><br/>manifest + signed bytes"]
+    dev["<b>Device</b><br/><i>Raspberry Pi</i><br/>Pi OS Lite aarch64"]
 
-The split is load-bearing. See [evo-core BOUNDARY.md](https://github.com/foonerd/evo-core/blob/main/docs/engineering/BOUNDARY.md) for why, and [volumio-evo-concept.md](volumio-evo-concept.md) for the Volumio-specific rack list and plugin mapping.
+    core ==>|pinned by tag| src
+    src ==>|cross-compile, sign, publish| art
+    art ==>|manifest-driven fetch| dev
+```
+
+Three repositories, one flow. `evo-core` ships source and tags only. This distribution pins a tag, cross-compiles the steward and its own plugins, signs every piece with the vendor's key, and publishes to a separate artefacts repository. Devices fetch what the manifest names, on the channel they track. Nothing else crosses the boundary.
+
+## What the device does
+
+Fifteen racks across three concerns. Full charters, kinds, and the mapping of Volumio's existing assets to each rack's role live in [volumio-evo-concept.md](volumio-evo-concept.md) sections 3 and 6.
+
+-   **Domain** - what the product does. `audio`, `audio_sources`, `audio_processing`, `networking`, `storage`, `library`, `artwork`, `metadata`, `branding`, `kiosk`.
+-   **Coordination** - when and why it acts. `appointments`, `watches`.
+-   **Infrastructure** - how the fabric runs over time. `observability`, `identity`, `lifecycle`.
+
+Each rack holds shelves; plugins stock slots in the shelves; the steward composes the lot. No plugin ever addresses another plugin. Adding a streaming service, a new DAC driver, or a fresh metadata provider is stocking an existing shelf with a new plugin; the rack list does not change.
+
+## How a change reaches a device
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Dev as Developer
+    participant Src as Source repo
+    participant CI as Workflow
+    participant Art as Artefacts repo
+    participant Pi as Device
+
+    Dev->>Src: commit plugin fix
+    Src->>CI: trigger continuous-dev
+    CI->>Art: sign and publish to dev
+    Pi->>Art: CHECK fetch manifest
+    Art-->>Pi: new version on dev
+    Pi-->>Dev: OFFER with changelog
+    Dev->>Pi: confirm
+    Pi->>Art: fetch signed piece
+    Pi->>Pi: verify and APPLY
+```
+
+One piece replaced. Every other piece - steward, catalogue, other plugins, branding, trust material - untouched. Promoting this version from `dev` to `test` later is a manifest-pointer move, not a rebuild; the bytes on `test` are bit-identical to the bytes already on `dev`.
+
+## Documentation
+
+| If you are... | Read |
+|---|---|
+| **New to this repository** | [SHOWCASE.md](SHOWCASE.md) - the distribution-process showcase. Why three repos, how pieces flow, what channels are, how a future `evo-device-<brand>` follows the pattern. |
+| **Bringing up a Pi from blank Pi OS Lite** | [BUILD.md](BUILD.md) - the step-by-step runbook. Workstation prerequisites, build procedure, first install, update flows, promotion, verification. |
+| **Working on the source tree** | [DEVELOPING.md](DEVELOPING.md) - workspace conventions, build and test commands, pin-upgrade procedure. |
+| **Learning the domain** | [volumio-evo-concept.md](volumio-evo-concept.md) - the full rack list, plugin mapping, fabric vocabulary specific to Volumio. |
+| **Looking at the framework** | [evo-core](https://github.com/foonerd/evo-core) - upstream framework docs (CONCEPT, BOUNDARY, CATALOGUE, SCHEMAS, PLUGIN_AUTHORING, and more). |
 
 ## Status
 
-Early. Completed milestones:
+Early. Foundation is complete; first real engineering starts at Milestone 2.
 
--   Milestone 0: `SHOWCASE.md` - the distribution-process showcase. Prerequisites, responsibilities, repositories, workflows, channels, trust, POC path. Written to be readable by future `evo-device-<brand>` distributions as a worked example.
--   Milestone 1: repository scaffolding. Workspace manifest, licence, developing guide, build guide, empty `catalogue/` and `plugins/` directories.
+**Landed**
 
-Upcoming milestones:
+-   Milestone 0 - distribution-process showcase ([SHOWCASE.md](SHOWCASE.md)).
+-   Milestone 1 - repository scaffolding (Cargo workspace, licence, docs, placeholder directories).
+-   [BUILD.md](BUILD.md) - executable runbook, companion to SHOWCASE.
+-   `scripts/` - automation skeleton. `bootstrap.sh` (skeleton that completes as later milestones land), `reset.sh` (fully working today), workstation `Makefile` for cross-compiles.
 
--   Milestone 2: `catalogue/volumio.toml` declaring the racks, shelves, and relation predicates from the concept document.
--   Milestone 3: the MPD playback warden (`com.volumio.playback.mpd`), stocking `audio.playback`.
--   Milestone 4: the album-art respondent (`com.volumio.artwork.local`), stocking `artwork.providers`.
--   Later: the remaining plugins per the concept document's mapping table, packaging for Debian Trixie, branding, frontend and kiosk integration, cross-architecture CI.
+**Next**
 
-## Layout
+-   Milestone 2 - `catalogue/volumio.toml` declaring racks, shelves, and relation predicates.
+-   Milestone 3 - `com.volumio.playback.mpd` stocking `audio.playback` (first plugin, first real release).
+-   Milestone 4 - `com.volumio.artwork.local` stocking `artwork.providers` (second plugin, first multi-piece composition).
 
--   `Cargo.toml` - workspace manifest, evo-core pin, shared dependencies.
--   `catalogue/` - the Volumio catalogue TOML. Populated at Milestone 2.
--   `plugins/` - plugin crates. Populated from Milestone 3 onward; will be added to the workspace members array as each lands.
--   `SHOWCASE.md` - the distribution-process showcase. The WHAT and WHY at architecture level; readable by this distribution's engineering and by future `evo-device-<brand>` authors.
--   `BUILD.md` - the executable runbook. Step-by-step procedure for taking source and turning it into a running device. The HOW end to end.
--   `DEVELOPING.md` - contributor workflow. How to work on the source code day-to-day.
--   `LICENSE` - Apache 2.0.
+`evo-core` is pinned at tag `v0.1.7` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 
-## Relationship to evo-core
+## For distributions that follow
 
-Evo-core is pinned at tag `v0.1.7` via a git dependency in `[workspace.dependencies]`. The pin is deliberate and bumped with intent when an evo-core release justifies it. See evo-core's `docs/engineering/BOUNDARY.md` section 8 for the pinning contract and this repo's `DEVELOPING.md` for the bump procedure.
+`evo-device-bmw-alpine-900`, `evo-device-acme-player`, whichever distribution comes next reads this repository as a worked example. The pattern is the same everywhere:
 
-Nothing in this repository modifies evo-core. Framework changes go upstream to `foonerd/evo-core`; distribution changes live here. If a proposed change here seems to require touching evo-core, re-read `BOUNDARY.md` first - the answer is usually a plugin.
+-   A source repo named `evo-device-<brand>`, an artefacts repo named `evo-device-<brand>-artefacts`, both owned by the same vendor.
+-   The framework pinned by tag at the distribution's discretion.
+-   Every piece signed with the vendor's key.
+-   Devices fetch what the manifest names, on the channel they track.
+
+[SHOWCASE.md](SHOWCASE.md) is written specifically so the Volumio text reads as a generic pattern once brand-specific nouns are substituted. If a section breaks that test, it belongs somewhere else.
+
+## Related
+
+-   [foonerd/evo-core](https://github.com/foonerd/evo-core) - the framework.
+-   [foonerd/evo-device-volumio-artefacts](https://github.com/foonerd/evo-device-volumio-artefacts) - the release plane for this distribution.
 
 ## License
 
