@@ -1,0 +1,296 @@
+# volumio.toml - the evo-device-volumio catalogue.
+#
+# Declares the racks, shelves, and relation predicates that make up
+# this distribution's fabric. Read by the steward at startup.
+#
+# Schema:         evo-core/docs/engineering/SCHEMAS.md section 3.2.
+# Authoring:      evo-core/docs/engineering/CATALOGUE.md.
+# Domain context: volumio-evo-concept.md sections 3 (racks) and 6 (plugin mapping).
+#
+# Milestone 2 state:
+#   - Every shelf at shape = 1.
+#   - Shelves are declared only where the concept doc or Milestones 3/4
+#     require one. No speculative shelves; the catalogue grows as plugins
+#     land, per CATALOGUE.md section 6.4.
+#   - Relation predicates are the minimum set Milestone 3 (MPD playback
+#     warden) and Milestone 4 (album-art respondent) strictly need:
+#     track <-> album. Further predicates (has_artwork, performed_by,
+#     composed_by, etc.) arrive with the plugins that assert them.
+
+
+# ============================================================
+# DOMAIN racks
+# ============================================================
+
+[[racks]]
+name = "audio"
+family = "domain"
+kinds = ["transformer"]
+charter = "Carry a stream from acquired source to present output."
+
+[[racks.shelves]]
+name = "playback"
+shape = 1
+description = "The active playback engine."
+
+[[racks.shelves]]
+name = "stage"
+shape = 1
+description = "Optional transformation stages between source and delivery."
+
+[[racks.shelves]]
+name = "delivery"
+shape = 1
+description = "The output stage delivering decoded audio to hardware."
+
+
+[[racks]]
+name = "audio_sources"
+family = "domain"
+kinds = ["producer"]
+charter = "Present selectable things to play; on selection, yield a playable stream."
+
+[[racks.shelves]]
+name = "catalogue"
+shape = 1
+description = "Sources that expose selectable items and produce a playable stream on selection."
+
+
+[[racks]]
+name = "audio_processing"
+family = "domain"
+kinds = ["transformer"]
+charter = "Alter stream character between acquisition and delivery in declared, composable ways."
+
+[[racks.shelves]]
+name = "stages"
+shape = 1
+description = "Composable processing stages: equalisation, resampling, mixing, effects."
+
+
+[[racks]]
+name = "networking"
+family = "domain"
+kinds = ["transformer", "registrar"]
+charter = "Move bytes between the device and other addressable things; hold what is reachable."
+
+[[racks.shelves]]
+name = "link"
+shape = 1
+description = "Custody of the active network link (wifi association, ethernet, bearer selection)."
+
+[[racks.shelves]]
+name = "reachable"
+shape = 1
+description = "Other addressable things the device can reach right now."
+
+
+[[racks]]
+name = "storage"
+family = "domain"
+kinds = ["registrar", "transformer"]
+charter = "Make content locations reachable; expose them as collections."
+
+[[racks.shelves]]
+name = "mount"
+shape = 1
+description = "Custody of reachable content locations (internal, USB, NAS)."
+
+[[racks.shelves]]
+name = "discovery"
+shape = 1
+description = "Discovery of new content locations on reachable networks."
+
+[[racks.shelves]]
+name = "file_sharing"
+shape = 1
+description = "Expose local content to other addressable things on the network."
+
+
+[[racks]]
+name = "library"
+family = "domain"
+kinds = ["registrar"]
+charter = "Unified queryable view across all reachable subject populations."
+
+[[racks.shelves]]
+name = "query"
+shape = 1
+description = "Federated queries over every reachable collection."
+
+
+[[racks]]
+name = "artwork"
+family = "domain"
+kinds = ["registrar"]
+charter = "Provide visual material representing content."
+
+[[racks.shelves]]
+name = "providers"
+shape = 1
+description = "Respondents that supply visual material for subjects."
+
+
+[[racks]]
+name = "metadata"
+family = "domain"
+kinds = ["registrar"]
+charter = "Provide factual and descriptive information about content."
+
+[[racks.shelves]]
+name = "providers"
+shape = 1
+description = "Respondents that supply facts and descriptions for subjects."
+
+
+[[racks]]
+name = "branding"
+family = "domain"
+kinds = ["registrar"]
+charter = "Express who this device is across every surface it presents on."
+
+[[racks.shelves]]
+name = "product"
+shape = 1
+description = "Product identity: name, colours, logo, device-name template."
+
+[[racks.shelves]]
+name = "boot"
+shape = 1
+description = "What the device shows during boot, before the kiosk takes over."
+
+
+[[racks]]
+name = "kiosk"
+family = "domain"
+kinds = ["presenter"]
+charter = "Present the device's information to someone in the same room."
+
+[[racks.shelves]]
+name = "surface"
+shape = 1
+description = "Custody of the local display surface (framebuffer, backlight, input)."
+
+[[racks.shelves]]
+name = "presenter"
+shape = 1
+description = "What is rendered on the local display surface."
+
+
+# ============================================================
+# COORDINATION racks
+# ============================================================
+
+[[racks]]
+name = "appointments"
+family = "coordination"
+kinds = ["producer"]
+charter = "Hold commitments to act at future moments; honour them."
+
+[[racks.shelves]]
+name = "scheduled"
+shape = 1
+description = "Time-triggered instructions (alarms, sleep timers, scheduled actions)."
+
+
+[[racks]]
+name = "watches"
+family = "coordination"
+kinds = ["producer"]
+charter = "Hold conditions being observed; dispatch when they trigger."
+
+[[racks.shelves]]
+name = "conditions"
+shape = 1
+description = "Condition-triggered instructions."
+
+
+# ============================================================
+# INFRASTRUCTURE racks
+# ============================================================
+
+[[racks]]
+name = "observability"
+family = "infrastructure"
+kinds = ["registrar"]
+charter = "Historical record of the fabric's transitions."
+
+[[racks.shelves]]
+name = "log"
+shape = 1
+description = "Persistent record of happenings, admission events, custody transitions."
+
+
+[[racks]]
+name = "identity"
+family = "infrastructure"
+kinds = ["registrar"]
+charter = "The device's name, locale, time, regulatory stance."
+
+[[racks.shelves]]
+name = "name"
+shape = 1
+description = "Device name and hostname."
+
+[[racks.shelves]]
+name = "locale"
+shape = 1
+description = "Locale, timezone, keyboard layout."
+
+[[racks.shelves]]
+name = "regulatory"
+shape = 1
+description = "Regulatory domain for wireless; jurisdictional configuration."
+
+
+[[racks]]
+name = "lifecycle"
+family = "infrastructure"
+kinds = ["producer", "registrar"]
+charter = "How the device updates, resets, transfers."
+
+[[racks.shelves]]
+name = "update"
+shape = 1
+description = "Bring installed pieces to the versions the tracked channels point at (CHECK / OFFER / APPLY)."
+
+[[racks.shelves]]
+name = "reset"
+shape = 1
+description = "Return parts of the device to a clean state."
+
+[[racks.shelves]]
+name = "shutdown"
+shape = 1
+description = "Graceful shutdown and reboot orchestration."
+
+
+# ============================================================
+# Relation predicates
+# ============================================================
+#
+# Minimum viable set for Milestones 3 (MPD playback warden) and 4
+# (album-art respondent). The album-art path, conceptually:
+#
+#   currently-playing track -> album_of -> album
+#   album -> (provider walks to visual material)
+#
+# Further predicates arrive with the plugins that assert them.
+
+[[relation]]
+predicate = "album_of"
+description = "Track belongs to an album."
+source_type = "track"
+target_type = "album"
+source_cardinality = "at_most_one"
+target_cardinality = "many"
+inverse = "tracks_of"
+
+[[relation]]
+predicate = "tracks_of"
+description = "Album contains tracks."
+source_type = "album"
+target_type = "track"
+source_cardinality = "many"
+target_cardinality = "at_most_one"
+inverse = "album_of"

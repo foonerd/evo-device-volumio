@@ -10,7 +10,7 @@ A typo in an ALSA parameter is a one-line config edit, not a redeploy. A bug in 
 
 ```mermaid
 flowchart LR
-    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.7)"]
+    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.8)"]
     src["<b>evo-device-volumio</b><br/><i>this repo</i><br/>catalogue + plugins + branding"]
     art["<b>evo-device-volumio-artefacts</b><br/><i>release plane</i><br/>manifest + signed bytes"]
     dev["<b>Device</b><br/><i>Raspberry Pi</i><br/>Pi OS Lite aarch64"]
@@ -74,16 +74,16 @@ Early. Foundation is complete; first real engineering starts at Milestone 2.
 
 -   Milestone 0 - distribution-process showcase ([SHOWCASE.md](SHOWCASE.md)).
 -   Milestone 1 - repository scaffolding (Cargo workspace, licence, docs, placeholder directories).
+-   Milestone 2 - `catalogue/volumio.toml` declaring 15 racks, 26 shelves, and the track-album relation predicates.
 -   [BUILD.md](BUILD.md) - executable runbook, companion to SHOWCASE.
 -   `scripts/` - automation skeleton. `bootstrap.sh` (skeleton that completes as later milestones land), `reset.sh` (fully working today), workstation `Makefile` for cross-compiles.
 
 **Next**
 
--   Milestone 2 - `catalogue/volumio.toml` declaring racks, shelves, and relation predicates.
 -   Milestone 3 - `com.volumio.playback.mpd` stocking `audio.playback` (first plugin, first real release).
 -   Milestone 4 - `com.volumio.artwork.local` stocking `artwork.providers` (second plugin, first multi-piece composition).
 
-`evo-core` is pinned at tag `v0.1.7` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
+`evo-core` is pinned at tag `v0.1.8` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 
 ## For distributions that follow
 

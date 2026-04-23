@@ -12,7 +12,7 @@ Contributor workflow for this repository. Companion to the Milestone 1 scaffoldi
 
 -   Rust stable, matching the workspace `rust-version = "1.80"`.
 -   Network access to github.com/foonerd for the `evo-plugin-sdk` git dependency.
--   A local checkout of [foonerd/evo-core](https://github.com/foonerd/evo-core) at tag `v0.1.7` if you want to run the steward against this repo's catalogue (see "Running the steward" below).
+-   A local checkout of [foonerd/evo-core](https://github.com/foonerd/evo-core) at tag `v0.1.8` if you want to run the steward against this repo's catalogue (see "Running the steward" below).
 
 ## Workspace conventions
 
