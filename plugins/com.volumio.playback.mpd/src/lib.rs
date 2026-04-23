@@ -29,6 +29,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+// MPD connection layer (Phase 3.1). Self-contained module; the
+// dead_code / unused_imports suppressions it needs during Phase 3.1
+// live at its own root and retire with Phase 3.2.
+mod mpd;
+
 use evo_plugin_sdk::contract::{
     Assignment, BuildInfo, CourseCorrection, CustodyHandle, HealthReport,
     HealthStatus, LoadContext, Plugin, PluginDescription, PluginError,

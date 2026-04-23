@@ -15,10 +15,12 @@ evo-plugin-sdk = { workspace = true }
 semver = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Extra tokio features only needed by tests (duplex streams, test-util utilities).
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

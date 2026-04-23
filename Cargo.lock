@@ -36,6 +36,7 @@ dependencies = [
  "anyhow",
  "evo-plugin-sdk",
  "semver",
+ "thiserror",
  "tokio",
  "tracing",
 ]

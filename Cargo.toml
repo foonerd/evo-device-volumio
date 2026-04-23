@@ -22,11 +22,17 @@ repository = "https://github.com/foonerd/evo-device-volumio"
 # `evo-plugin-sdk = { workspace = true }` so there is exactly one place to
 # bump the version. Pin is intentional; do not track evo-core main silently.
 # Upgrade procedure is documented in DEVELOPING.md.
+#
+# Non-framework dependencies (tokio, tracing, thiserror, etc.) are also
+# pinned here so plugin crates cannot drift independently. Feature sets
+# are the superset needed across the plugin population; individual crates
+# pay only for what they actually import.
 [workspace.dependencies]
 evo-plugin-sdk = { git = "https://github.com/foonerd/evo-core.git", tag = "v0.1.8", version = "0.1.8" }
 semver = { version = "1", features = ["serde"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "io-util", "sync"] }
 tracing = "0.1"
+thiserror = "1"
 anyhow = "1"
 
 # Mirrors evo-core's workspace lints. No unsafe; all public items documented.
