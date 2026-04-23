@@ -38,6 +38,7 @@ dependencies = [
  "semver",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
 ]
 

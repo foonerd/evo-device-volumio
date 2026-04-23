@@ -3,10 +3,12 @@
 //! MPD playback warden for evo-device-volumio. Stocks the
 //! `audio.playback` shelf declared by Milestone 2's catalogue.
 //!
-//! Milestone 3 is landing in phases. Phase 3.2c wires the
-//! connection layer and the playback supervisor into the `Warden`
-//! trait impls below, turning the Phase 3.0 stub into a real
-//! custody that drives a live MPD instance. Phase status:
+//! Milestone 3 is landing in phases. Phase 3.3 adds the
+//! configuration file: the steward reads
+//! `/etc/evo/plugins.d/com.volumio.playback.mpd.toml` and delivers
+//! the parsed table via [`LoadContext::config`]; the plugin
+//! applies it during `load()` to override the hardcoded defaults
+//! set by [`MpdPlaybackPlugin::new`]. Phase status:
 //!
 //! - Phase 3.0: crate skeleton, manifest, stub warden. Landed.
 //! - Phase 3.1: MPD connection layer - private module, socket and
@@ -18,18 +20,39 @@
 //!   orchestrating command + idle connections with bounded
 //!   reconnection and TOML state reports. Landed.
 //! - Phase 3.2c: supervisor wired into `take_custody`,
-//!   `course_correct`, `release_custody`, and `unload`. Lint
-//!   suppressions on `mpd.rs` and `playback_supervisor.rs`
-//!   retired (apart from a narrower `allow(dead_code)` on
-//!   `mpd.rs` documented at that module's root). Landed.
-//! - Phase 3.3: configuration file (`/etc/evo/plugins.d/
-//!   com.volumio.playback.mpd.toml`). Pending.
+//!   `course_correct`, `release_custody`, and `unload`. Landed.
+//! - Phase 3.3: operator configuration via
+//!   `/etc/evo/plugins.d/com.volumio.playback.mpd.toml`; endpoint
+//!   and timeouts overridable per the [`config`] module's schema.
+//!   Landed.
 //! - Phase 3.4: subject assertion (`track` and `album` with
 //!   `album_of` edges for Milestone 4's album-art respondent to
 //!   walk). Pending.
 //!
 //! The wire-transport binary lands after the in-process flow has
 //! stabilised.
+//!
+//! ## Operator configuration
+//!
+//! The schema, defaults, validation rules, and error hierarchy
+//! live in the [`config`] module. In brief:
+//!
+//! ```toml
+//! [endpoint]
+//! type = "tcp"           # "tcp" or "unix"
+//! host = "127.0.0.1"     # for tcp
+//! port = 6600            # for tcp
+//! # path = "/run/mpd/socket"   # for unix
+//!
+//! [timeouts]
+//! connect_ms = 5000      # 1..=60000
+//! welcome_ms = 2000      # 1..=60000
+//! command_ms = 3000      # 1..=300000
+//! ```
+//!
+//! All fields optional. Missing sections or fields use the
+//! defaults set by [`MpdPlaybackPlugin::new`]. An empty or absent
+//! config file is a valid (default-only) configuration.
 //!
 //! ## Course-correction payload encoding
 //!
@@ -61,6 +84,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod config;
 mod mpd;
 mod playback_supervisor;
 
@@ -75,6 +99,7 @@ use evo_plugin_sdk::contract::{
 };
 use evo_plugin_sdk::Manifest;
 
+use crate::config::PluginConfig;
 use crate::mpd::{ConnectTimeouts, MpdEndpoint};
 use crate::playback_supervisor::{PlaybackCommand, PlaybackError, SupervisorHandle};
 
@@ -119,9 +144,12 @@ struct TrackedCustody {
 /// MPD playback warden plugin.
 ///
 /// Construct via [`MpdPlaybackPlugin::new`] (default endpoint
-/// `127.0.0.1:6600`, default timeouts) or
-/// [`MpdPlaybackPlugin::with_endpoint`] (explicit override, used
-/// by tests and by Phase 3.3's configuration layer).
+/// `127.0.0.1:6600`, default timeouts). [`Plugin::load`] replaces
+/// the defaults with values from [`LoadContext::config`] if the
+/// operator has supplied a config file. Tests may also use
+/// [`MpdPlaybackPlugin::with_endpoint`] to construct a plugin
+/// pointing at a specific endpoint without going through the
+/// `load` path.
 pub struct MpdPlaybackPlugin {
     loaded: bool,
     endpoint: MpdEndpoint,
@@ -140,8 +168,8 @@ pub struct MpdPlaybackPlugin {
 impl MpdPlaybackPlugin {
     /// Construct a plugin pointing at the default local MPD
     /// endpoint (`127.0.0.1:6600`) with default connect / welcome
-    /// / command timeouts. Phase 3.3's configuration layer will
-    /// override these defaults from the on-disk config file.
+    /// / command timeouts. [`Plugin::load`] overrides these from
+    /// the operator's on-disk config file if one exists.
     pub fn new() -> Self {
         let endpoint = MpdEndpoint::tcp(DEFAULT_MPD_HOST, DEFAULT_MPD_PORT)
             .expect("default MPD endpoint (127.0.0.1:6600) must be valid");
@@ -150,8 +178,8 @@ impl MpdPlaybackPlugin {
 
     /// Construct a plugin with an explicit endpoint and timeout
     /// budget. Used by tests (pointing at a mock MPD on an
-    /// ephemeral loopback port) and by the Phase 3.3 config
-    /// loader.
+    /// ephemeral loopback port) and, where needed, by crate-
+    /// internal code that bypasses the config-file path.
     pub(crate) fn with_endpoint(endpoint: MpdEndpoint, timeouts: ConnectTimeouts) -> Self {
         Self {
             loaded: false,
@@ -178,6 +206,23 @@ impl MpdPlaybackPlugin {
     /// supervisor since construction.
     pub fn corrections_dispatched(&self) -> u64 {
         self.corrections_dispatched
+    }
+
+    /// Parse an operator config table into a [`PluginConfig`] and
+    /// apply it to `self`, replacing the fields set by
+    /// [`MpdPlaybackPlugin::new`].
+    ///
+    /// Shared between the [`Plugin::load`] path (which gets the
+    /// table from [`LoadContext::config`]) and tests (which
+    /// construct the table directly). Does not change the
+    /// `loaded` flag; that is the caller's responsibility.
+    fn apply_config_table(&mut self, table: &toml::Table) -> Result<(), PluginError> {
+        let config = PluginConfig::from_toml_table(table).map_err(|e| {
+            PluginError::Permanent(format!("invalid plugin config: {e}"))
+        })?;
+        self.endpoint = config.endpoint;
+        self.timeouts = config.timeouts;
+        Ok(())
     }
 }
 
@@ -317,15 +362,27 @@ impl Plugin for MpdPlaybackPlugin {
 
     fn load<'a>(
         &'a mut self,
-        _ctx: &'a LoadContext,
+        ctx: &'a LoadContext,
     ) -> impl Future<Output = Result<(), PluginError>> + Send + 'a {
         async move {
             tracing::info!(
                 plugin = PLUGIN_NAME,
-                endpoint = %self.endpoint,
-                "plugin load"
+                config_keys = ctx.config.len(),
+                "plugin load beginning"
             );
+
+            self.apply_config_table(&ctx.config)?;
             self.loaded = true;
+
+            tracing::info!(
+                plugin = PLUGIN_NAME,
+                endpoint = %self.endpoint,
+                connect_ms = self.timeouts.connect.as_millis() as u64,
+                welcome_ms = self.timeouts.welcome.as_millis() as u64,
+                command_ms = self.timeouts.command.as_millis() as u64,
+                "plugin loaded; config applied"
+            );
+
             Ok(())
         }
     }
@@ -619,6 +676,138 @@ mod tests {
             HealthStatus::Unhealthy
         ));
         assert_eq!(p.active_custody_count(), 0);
+    }
+
+    #[test]
+    fn new_uses_default_endpoint_and_timeouts() {
+        let p = MpdPlaybackPlugin::new();
+        assert_eq!(
+            p.endpoint,
+            MpdEndpoint::tcp("127.0.0.1", 6600).unwrap()
+        );
+        let d = ConnectTimeouts::default();
+        assert_eq!(p.timeouts.connect, d.connect);
+        assert_eq!(p.timeouts.welcome, d.welcome);
+        assert_eq!(p.timeouts.command, d.command);
+    }
+
+    // ===== apply_config_table tests =====
+
+    #[test]
+    fn apply_config_table_empty_keeps_defaults() {
+        let mut p = MpdPlaybackPlugin::new();
+        let before_endpoint = p.endpoint.clone();
+        let before_connect = p.timeouts.connect;
+
+        let table: toml::Table = "".parse().unwrap();
+        p.apply_config_table(&table).unwrap();
+
+        assert_eq!(p.endpoint, before_endpoint);
+        assert_eq!(p.timeouts.connect, before_connect);
+    }
+
+    #[test]
+    fn apply_config_table_tcp_overrides_endpoint() {
+        let mut p = MpdPlaybackPlugin::new();
+
+        let table: toml::Table = r#"
+            [endpoint]
+            type = "tcp"
+            host = "mpd.example"
+            port = 6700
+        "#
+        .parse()
+        .unwrap();
+        p.apply_config_table(&table).unwrap();
+
+        assert_eq!(
+            p.endpoint,
+            MpdEndpoint::tcp("mpd.example", 6700).unwrap()
+        );
+    }
+
+    #[test]
+    fn apply_config_table_unix_overrides_endpoint() {
+        let mut p = MpdPlaybackPlugin::new();
+
+        let table: toml::Table = r#"
+            [endpoint]
+            type = "unix"
+            path = "/run/mpd/socket"
+        "#
+        .parse()
+        .unwrap();
+        p.apply_config_table(&table).unwrap();
+
+        assert_eq!(
+            p.endpoint,
+            MpdEndpoint::unix("/run/mpd/socket").unwrap()
+        );
+    }
+
+    #[test]
+    fn apply_config_table_overrides_timeouts() {
+        let mut p = MpdPlaybackPlugin::new();
+
+        let table: toml::Table = r#"
+            [timeouts]
+            connect_ms = 1234
+            welcome_ms = 567
+            command_ms = 8910
+        "#
+        .parse()
+        .unwrap();
+        p.apply_config_table(&table).unwrap();
+
+        assert_eq!(p.timeouts.connect, Duration::from_millis(1234));
+        assert_eq!(p.timeouts.welcome, Duration::from_millis(567));
+        assert_eq!(p.timeouts.command, Duration::from_millis(8910));
+    }
+
+    #[test]
+    fn apply_config_table_invalid_config_returns_permanent() {
+        let mut p = MpdPlaybackPlugin::new();
+
+        let table: toml::Table = r#"
+            [endpoint]
+            type = "carrier-pigeon"
+        "#
+        .parse()
+        .unwrap();
+        let e = p.apply_config_table(&table).unwrap_err();
+        assert!(matches!(e, PluginError::Permanent(_)));
+
+        // Failed apply leaves state unchanged.
+        assert_eq!(
+            p.endpoint,
+            MpdEndpoint::tcp("127.0.0.1", 6600).unwrap()
+        );
+    }
+
+    #[test]
+    fn apply_config_table_wraps_error_message() {
+        let mut p = MpdPlaybackPlugin::new();
+
+        let table: toml::Table = r#"
+            [endpoint]
+            port = 0
+        "#
+        .parse()
+        .unwrap();
+        let e = p.apply_config_table(&table).unwrap_err();
+        match e {
+            PluginError::Permanent(msg) => {
+                assert!(
+                    msg.contains("invalid plugin config"),
+                    "message should namespace the error: {msg:?}"
+                );
+                assert!(
+                    msg.contains("port"),
+                    "message should mention the offending field: {msg:?}"
+                );
+            }
+            other => panic!("expected Permanent, got {other:?}"),
+        }
     }
 
     // ===== gate tests (pure) =====

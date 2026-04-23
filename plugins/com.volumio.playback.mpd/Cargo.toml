@@ -17,6 +17,11 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+# Plugin-local: used to parse `LoadContext::config` in `src/config.rs`.
+# Matches the version the SDK carries transitively; direct declaration is
+# required to name `toml::Table` as a type in this crate. Not a workspace
+# dep because not every future plugin will want a configuration file.
+toml = "0.8"
 
 [dev-dependencies]
 # Extra tokio features only needed by tests (duplex streams, test-util utilities).
