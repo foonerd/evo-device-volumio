@@ -99,6 +99,102 @@ pub(crate) struct MpdSong {
     pub(crate) duration: Option<Duration>,
 }
 
+/// MPD idle subsystems.
+///
+/// The canonical set listed in MPD's protocol documentation. Used by
+/// the `idle` command both to request subscription (client tells MPD
+/// which subsystems it cares about) and to surface change events
+/// (MPD tells the client which subsystems changed).
+///
+/// Unknown values parse to [`IdleSubsystem::Other`] rather than
+/// erroring. This lets the warden keep running against a future MPD
+/// that adds a new subsystem; the change event is simply observed
+/// under its protocol name and ignored if the warden does not yet
+/// recognise it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum IdleSubsystem {
+    /// The song database.
+    Database,
+    /// A database update has started or finished.
+    Update,
+    /// A stored playlist has been modified.
+    StoredPlaylist,
+    /// The current queue has been modified.
+    Playlist,
+    /// The player has been started, stopped or seeked.
+    Player,
+    /// The volume has been changed.
+    Mixer,
+    /// An audio output has been added, removed, or toggled.
+    Output,
+    /// Playback options (repeat, random, crossfade, replay gain).
+    Options,
+    /// A partition was added, removed, or changed.
+    Partition,
+    /// The sticker database has been modified.
+    Sticker,
+    /// A client has subscribed or unsubscribed to a channel.
+    Subscription,
+    /// A message was received on a channel.
+    Message,
+    /// A neighbor was found or lost.
+    Neighbor,
+    /// The mount list has changed.
+    Mount,
+    /// An unknown subsystem name. Stored as the raw protocol string
+    /// so the warden can surface it in diagnostics without losing
+    /// information.
+    Other(String),
+}
+
+impl IdleSubsystem {
+    /// The MPD protocol wire name for this subsystem.
+    pub(crate) fn as_protocol_str(&self) -> &str {
+        match self {
+            Self::Database => "database",
+            Self::Update => "update",
+            Self::StoredPlaylist => "stored_playlist",
+            Self::Playlist => "playlist",
+            Self::Player => "player",
+            Self::Mixer => "mixer",
+            Self::Output => "output",
+            Self::Options => "options",
+            Self::Partition => "partition",
+            Self::Sticker => "sticker",
+            Self::Subscription => "subscription",
+            Self::Message => "message",
+            Self::Neighbor => "neighbor",
+            Self::Mount => "mount",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+
+    /// Parse an MPD protocol subsystem name.
+    ///
+    /// Unknown names return `IdleSubsystem::Other(s.to_string())`
+    /// rather than erroring: the protocol can gain subsystems
+    /// without our crate having to handle every one explicitly.
+    pub(crate) fn from_protocol_str(s: &str) -> Self {
+        match s {
+            "database" => Self::Database,
+            "update" => Self::Update,
+            "stored_playlist" => Self::StoredPlaylist,
+            "playlist" => Self::Playlist,
+            "player" => Self::Player,
+            "mixer" => Self::Mixer,
+            "output" => Self::Output,
+            "options" => Self::Options,
+            "partition" => Self::Partition,
+            "sticker" => Self::Sticker,
+            "subscription" => Self::Subscription,
+            "message" => Self::Message,
+            "neighbor" => Self::Neighbor,
+            "mount" => Self::Mount,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +213,59 @@ mod tests {
         assert!(a < b);
         assert!(b < c);
         assert_eq!(b, MpdVersion::new(0, 23, 0));
+    }
+
+    #[test]
+    fn idle_subsystem_all_known_variants_round_trip() {
+        // Exhaustive over the canonical MPD subsystem set. If MPD
+        // adds a new subsystem, from_protocol_str maps it to
+        // Other(_) rather than failing; this test does not need to
+        // be updated in that case (a new round-trip test for the
+        // new variant would be added).
+        for s in [
+            IdleSubsystem::Database,
+            IdleSubsystem::Update,
+            IdleSubsystem::StoredPlaylist,
+            IdleSubsystem::Playlist,
+            IdleSubsystem::Player,
+            IdleSubsystem::Mixer,
+            IdleSubsystem::Output,
+            IdleSubsystem::Options,
+            IdleSubsystem::Partition,
+            IdleSubsystem::Sticker,
+            IdleSubsystem::Subscription,
+            IdleSubsystem::Message,
+            IdleSubsystem::Neighbor,
+            IdleSubsystem::Mount,
+        ] {
+            let wire = s.as_protocol_str().to_string();
+            let back = IdleSubsystem::from_protocol_str(&wire);
+            assert_eq!(back, s, "round trip failed for {s:?}");
+        }
+    }
+
+    #[test]
+    fn idle_subsystem_stored_playlist_uses_underscored_wire_name() {
+        assert_eq!(
+            IdleSubsystem::StoredPlaylist.as_protocol_str(),
+            "stored_playlist"
+        );
+    }
+
+    #[test]
+    fn idle_subsystem_unknown_parses_as_other() {
+        let parsed = IdleSubsystem::from_protocol_str("future_subsystem");
+        match parsed {
+            IdleSubsystem::Other(s) => assert_eq!(s, "future_subsystem"),
+            other => panic!("expected Other(_), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn idle_subsystem_other_variant_round_trips_its_contents() {
+        let original = IdleSubsystem::Other("custom".to_string());
+        assert_eq!(original.as_protocol_str(), "custom");
+        let back = IdleSubsystem::from_protocol_str("custom");
+        assert_eq!(back, IdleSubsystem::Other("custom".to_string()));
     }
 }
