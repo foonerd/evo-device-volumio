@@ -49,7 +49,7 @@
 //! 3. After every non-empty idle event (best-effort).
 //!
 //! Each emission is a fresh `status` + `currentsong` on the
-//! command connection, projected to [`PlaybackStateReport`],
+//! command connection, projected to `PlaybackStateReport`,
 //! serialised to TOML, sent via the reporter.
 
 use std::sync::Arc;
@@ -80,7 +80,7 @@ const RECONNECT_MAX_ATTEMPTS: u32 = 10;
 /// Budget per [`MpdConnection::idle`] call on the idle task.
 const IDLE_BUDGET: Duration = Duration::from_secs(30);
 /// Subsystems the idle task subscribes to. Covers everything that
-/// affects the fields reported in [`PlaybackStateReport`].
+/// affects the fields reported in `PlaybackStateReport`.
 const IDLE_SUBSYSTEMS: &[IdleSubsystem] = &[
     IdleSubsystem::Player,
     IdleSubsystem::Mixer,
@@ -149,8 +149,8 @@ impl SupervisorHandle {
 ///
 /// Either connection failing to open, or the initial report
 /// failing to be produced, aborts the whole spawn: no tasks are
-/// spawned, no resources leak. The caller's
-/// [`Plugin::take_custody`] impl propagates the error.
+/// spawned, no resources leak. The caller's `take_custody` impl
+/// propagates the error.
 pub(crate) async fn spawn(
     endpoint: MpdEndpoint,
     timeouts: ConnectTimeouts,
@@ -241,8 +241,7 @@ enum IdleEvent {
 ///
 /// `next_delay` doubles the delay each call up to [`RECONNECT_MAX`],
 /// returning `None` after [`RECONNECT_MAX_ATTEMPTS`] have been
-/// consumed. `reset` returns the state to its initial condition
-/// after a successful connect.
+/// consumed.
 struct BackoffState {
     attempt: u32,
     max_attempts: u32,
@@ -639,17 +638,12 @@ async fn idle_task(
 mod tests {
     use super::*;
 
-    use std::pin::Pin;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use std::sync::Arc;
 
-    use evo_plugin_sdk::contract::ReportError;
-
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::task::JoinHandle;
-
-    use std::future::Future;
+    use super::super::test_mock::{
+        spawn_mock_mpd, short_timeouts, test_custody_handle, CapturingReporter,
+        ConnBehaviour,
+    };
 
     // ----- backoff unit tests -----
 
@@ -677,214 +671,6 @@ mod tests {
         }
         assert_eq!(b.next_delay(), None);
         assert_eq!(b.attempts_used(), RECONNECT_MAX_ATTEMPTS);
-    }
-
-    // ----- reporter fixture -----
-
-    #[derive(Default)]
-    struct CapturingReporter {
-        reports: Mutex<Vec<(String, Vec<u8>, HealthStatus)>>,
-        count: AtomicUsize,
-    }
-
-    impl CapturingReporter {
-        fn count(&self) -> usize {
-            self.count.load(Ordering::SeqCst)
-        }
-        fn last_payload(&self) -> Option<Vec<u8>> {
-            self.reports
-                .lock()
-                .unwrap()
-                .last()
-                .map(|(_, p, _)| p.clone())
-        }
-    }
-
-    impl CustodyStateReporter for CapturingReporter {
-        fn report<'a>(
-            &'a self,
-            handle: &'a CustodyHandle,
-            payload: Vec<u8>,
-            health: HealthStatus,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-        > {
-            let handle_id = handle.id.clone();
-            Box::pin(async move {
-                self.reports
-                    .lock()
-                    .unwrap()
-                    .push((handle_id, payload, health));
-                self.count.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            })
-        }
-    }
-
-    // ----- mock MPD infrastructure -----
-
-    fn short_timeouts() -> ConnectTimeouts {
-        ConnectTimeouts {
-            connect: Duration::from_millis(500),
-            welcome: Duration::from_millis(500),
-            command: Duration::from_millis(500),
-        }
-    }
-
-    /// Behaviour for a single connection to the mock MPD. Each
-    /// variant describes how the mock responds to a sequence of
-    /// client commands after the welcome banner.
-    #[derive(Clone)]
-    enum ConnBehaviour {
-        /// Generic "MPD is working" handler:
-        /// - status => "state: stop\\nOK\\n"
-        /// - currentsong => "OK\\n"
-        /// - idle => hold forever
-        /// - anything else => "OK\\n"
-        Standard,
-        /// Same as Standard, but the Nth command (1-indexed) gets
-        /// an ACK response instead of OK.
-        AckOnNth {
-            nth: usize,
-            code: u32,
-            message: String,
-        },
-        /// Same as Standard, but the Nth command (1-indexed)
-        /// causes the connection to close immediately.
-        CloseOnNth { nth: usize },
-        /// Welcome then hold forever. Used for the idle-side
-        /// connection in tests that do not care about idle.
-        HoldAfterWelcome,
-        /// Welcome, then respond to idle with an immediate
-        /// "changed: player\\nOK\\n", then hold.
-        IdleOnceThenHold,
-    }
-
-    /// Bind a loopback listener and serve each incoming
-    /// connection with the behaviour at the matching position in
-    /// `behaviours`. The mock tolerates more connections than
-    /// behaviours (extras are dropped immediately).
-    async fn spawn_mock_mpd(
-        behaviours: Vec<ConnBehaviour>,
-    ) -> (MpdEndpoint, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let endpoint =
-            MpdEndpoint::tcp(addr.ip().to_string(), addr.port()).unwrap();
-        let task = tokio::spawn(async move {
-            let mut iter = behaviours.into_iter();
-            loop {
-                let (stream, _) = match listener.accept().await {
-                    Ok(p) => p,
-                    Err(_) => return,
-                };
-                match iter.next() {
-                    Some(b) => {
-                        tokio::spawn(serve_connection(stream, b));
-                    }
-                    None => {
-                        drop(stream);
-                    }
-                }
-            }
-        });
-        (endpoint, task)
-    }
-
-    async fn serve_connection(mut stream: TcpStream, b: ConnBehaviour) {
-        let (r, mut w) = stream.split();
-        let mut reader = BufReader::new(r);
-
-        // Welcome first, always.
-        if w.write_all(b"OK MPD 0.23.5\n").await.is_err() {
-            return;
-        }
-        if w.flush().await.is_err() {
-            return;
-        }
-
-        match b {
-            ConnBehaviour::HoldAfterWelcome => {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-            }
-            ConnBehaviour::IdleOnceThenHold => {
-                let mut line = String::new();
-                loop {
-                    line.clear();
-                    match reader.read_line(&mut line).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(_) => {}
-                    }
-                    if line.starts_with("idle") {
-                        let _ = w
-                            .write_all(b"changed: player\nOK\n")
-                            .await;
-                        let _ = w.flush().await;
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                        return;
-                    }
-                    let _ = w.write_all(b"OK\n").await;
-                    let _ = w.flush().await;
-                }
-            }
-            ConnBehaviour::Standard
-            | ConnBehaviour::AckOnNth { .. }
-            | ConnBehaviour::CloseOnNth { .. } => {
-                let mut seq: usize = 0;
-                let mut line = String::new();
-                loop {
-                    line.clear();
-                    match reader.read_line(&mut line).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(_) => {}
-                    }
-                    seq += 1;
-
-                    if let ConnBehaviour::AckOnNth {
-                        nth,
-                        code,
-                        ref message,
-                    } = b
-                    {
-                        if seq == nth {
-                            let cmd_name =
-                                line.split_whitespace().next().unwrap_or("");
-                            let ack = format!(
-                                "ACK [{}@0] {{{}}} {}\n",
-                                code, cmd_name, message
-                            );
-                            let _ = w.write_all(ack.as_bytes()).await;
-                            let _ = w.flush().await;
-                            continue;
-                        }
-                    }
-                    if let ConnBehaviour::CloseOnNth { nth } = b {
-                        if seq == nth {
-                            return;
-                        }
-                    }
-
-                    if line.starts_with("status") {
-                        let _ = w
-                            .write_all(b"state: stop\nOK\n")
-                            .await;
-                    } else if line.starts_with("currentsong") {
-                        let _ = w.write_all(b"OK\n").await;
-                    } else if line.starts_with("idle") {
-                        // Hold forever on idle; no response.
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                        return;
-                    } else {
-                        let _ = w.write_all(b"OK\n").await;
-                    }
-                    let _ = w.flush().await;
-                }
-            }
-        }
-    }
-
-    fn test_custody_handle() -> CustodyHandle {
-        CustodyHandle::new("custody-test")
     }
 
     // ----- integration tests -----

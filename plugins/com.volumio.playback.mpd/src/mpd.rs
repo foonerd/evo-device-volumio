@@ -28,44 +28,48 @@
 //!   streams all work.
 //! - [`connection`]: ties it together. Opens the transport, reads
 //!   the welcome banner, dispatches commands with timeout budgets,
-//!   projects protocol fields into the narrow domain types. In
-//!   Phase 3.2a extended with transport commands (play, pause,
-//!   stop, next, previous, seek, set_volume) and the `idle`
-//!   subprotocol.
+//!   projects protocol fields into the narrow domain types. Phase
+//!   3.2a added transport commands (play, pause, stop, next,
+//!   previous, seek, set_volume) and the `idle` subprotocol.
 //!
-//! ## Scope
+//! ## Scope and consumption
 //!
 //! Phase 3.1 delivered the protocol stack and status / currentsong.
-//! Phase 3.2a adds transport commands and the idle subprotocol on
-//! the same connection layer. Phase 3.2b builds the playback
-//! supervisor that orchestrates two connections (one for commands,
-//! one for idle - MPD blocks the connection during idle, so the
-//! two cannot share). Phase 3.2c wires the supervisor into the
-//! warden trait impls and retires the lint suppressions below.
+//! Phase 3.2a added transport commands and the idle subprotocol.
+//! Phase 3.2b built the [`crate::playback_supervisor`] that
+//! orchestrates two connections (one for commands, one for idle).
+//! Phase 3.2c wired the supervisor into the warden trait impls in
+//! `crate` root; the `unused_imports` suppression that guarded the
+//! declared-but-unconsumed re-exports during 3.1-3.2b is retired
+//! as part of 3.2c.
 //!
 //! Phase 3.3 adds the configuration layer that produces the
 //! [`endpoint::MpdEndpoint`] the connection opens. Phase 3.4 uses
 //! the parsed [`types::MpdSong`] to assert `track` and `album`
 //! subjects for Milestone 4's album-art respondent to walk.
 //!
-//! ## Lint suppressions (Phase 3.1 / 3.2a)
+//! ## dead_code suppression
 //!
-//! The two inner attributes below exist because this module's
-//! public-within-crate surface is declared now but not yet
-//! consumed by the warden impl in `lib.rs`:
+//! The module retains `#![allow(dead_code)]` for items that are
+//! part of the connection-layer contract but not exercised by the
+//! current consumers. These include:
 //!
-//! - `dead_code`: the pub(crate) items inside the submodules
-//!   (endpoint, connection, types, error) have no call sites
-//!   outside tests until Phase 3.2c wires them in.
-//! - `unused_imports`: the `pub(crate) use` re-exports below are
-//!   unused for the same reason.
+//! - `MpdConnection::version`, `::endpoint`, `::connected_at`,
+//!   `::ping` - accessor / liveness helpers referenced only by
+//!   tests today.
+//! - `IdleSubsystem` variants the supervisor does not yet
+//!   subscribe to (database, update, stored_playlist, output,
+//!   partition, sticker, subscription, message, neighbor, mount);
+//!   retained so a future subscription change does not need a
+//!   round-trip through the type definition.
+//! - Error sub-types used only for `#[from]` construction inside
+//!   the module.
 //!
-//! Phase 3.2c's warden wiring is the natural retirement for both
-//! suppressions; removing these attributes is a deliverable of
-//! that phase.
+//! Removing the module-level attribute requires a per-item
+//! `#[cfg(test)]` or `#[allow(dead_code)]` audit and is deferred
+//! to a later housekeeping commit.
 
 #![allow(dead_code)]
-#![allow(unused_imports)]
 
 mod connection;
 mod endpoint;
@@ -74,11 +78,13 @@ mod framing;
 mod protocol;
 mod types;
 
-// Public surface within the crate. Phase 3.2b/3.2c consume these
-// from `crate::mpd::{...}`; internal paths into the submodules are
-// not part of the module's contract.
+// Public surface within the crate. Consumed by `lib.rs`,
+// `playback_supervisor::actor`, and `playback_supervisor::report`.
+// Items re-exported here are all used via
+// `crate::mpd::{...}`; unused re-exports would trip the default
+// unused_imports lint and block the build.
 
 pub(crate) use connection::{ConnectTimeouts, MpdConnection};
 pub(crate) use endpoint::MpdEndpoint;
-pub(crate) use error::{ConfigError, MpdError, ProtocolError, TransportError};
-pub(crate) use types::{IdleSubsystem, MpdSong, MpdStatus, MpdVersion, PlayState};
+pub(crate) use error::MpdError;
+pub(crate) use types::{IdleSubsystem, MpdSong, MpdStatus, PlayState};
