@@ -68,12 +68,18 @@ mod tests {
 
     #[test]
     fn tcp_rejects_empty_host() {
-        assert!(matches!(MpdEndpoint::tcp("", 6600), Err(ConfigError::EmptyHost)));
+        assert!(matches!(
+            MpdEndpoint::tcp("", 6600),
+            Err(ConfigError::EmptyHost)
+        ));
     }
 
     #[test]
     fn tcp_rejects_whitespace_host() {
-        assert!(matches!(MpdEndpoint::tcp("   ", 6600), Err(ConfigError::EmptyHost)));
+        assert!(matches!(
+            MpdEndpoint::tcp("   ", 6600),
+            Err(ConfigError::EmptyHost)
+        ));
     }
 
     #[test]

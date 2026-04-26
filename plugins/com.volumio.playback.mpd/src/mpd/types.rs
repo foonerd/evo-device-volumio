@@ -41,7 +41,11 @@ pub(crate) struct MpdVersion {
 impl MpdVersion {
     /// Construct a version with the three components.
     pub(crate) fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 }
 

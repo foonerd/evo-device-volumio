@@ -199,7 +199,10 @@ mod tests {
         });
 
         assert_eq!(f.read_line_with_timeout(SHORT, "r").await.unwrap(), "first");
-        assert_eq!(f.read_line_with_timeout(SHORT, "r").await.unwrap(), "second");
+        assert_eq!(
+            f.read_line_with_timeout(SHORT, "r").await.unwrap(),
+            "second"
+        );
         assert_eq!(f.read_line_with_timeout(SHORT, "r").await.unwrap(), "third");
     }
 
@@ -284,10 +287,7 @@ mod tests {
         let mut f = Framing::new(r, w);
 
         tokio::spawn(async move {
-            server
-                .write_all("Bj\u{00f6}rk\n".as_bytes())
-                .await
-                .unwrap();
+            server.write_all("Bj\u{00f6}rk\n".as_bytes()).await.unwrap();
             server.shutdown().await.unwrap();
         });
 

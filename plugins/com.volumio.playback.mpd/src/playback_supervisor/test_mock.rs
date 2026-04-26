@@ -17,9 +17,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use evo_plugin_sdk::contract::{
-    CustodyHandle, CustodyStateReporter, ExternalAddressing, HealthStatus,
-    RelationAnnouncer, RelationAssertion, RelationRetraction, ReportError,
-    SubjectAnnouncement, SubjectAnnouncer,
+    CustodyHandle, CustodyStateReporter, ExternalAddressing, HealthStatus, RelationAnnouncer,
+    RelationAssertion, RelationRetraction, ReportError, SubjectAnnouncement, SubjectAnnouncer,
 };
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -65,9 +64,7 @@ impl CapturingReporter {
     }
 
     /// Full record of the most recent report, if any.
-    pub(crate) fn last(
-        &self,
-    ) -> Option<(CustodyHandle, Vec<u8>, HealthStatus)> {
+    pub(crate) fn last(&self) -> Option<(CustodyHandle, Vec<u8>, HealthStatus)> {
         self.reports.lock().unwrap().last().cloned()
     }
 
@@ -83,15 +80,10 @@ impl CustodyStateReporter for CapturingReporter {
         handle: &'a CustodyHandle,
         payload: Vec<u8>,
         health: HealthStatus,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>> {
         let handle = handle.clone();
         Box::pin(async move {
-            self.reports
-                .lock()
-                .unwrap()
-                .push((handle, payload, health));
+            self.reports.lock().unwrap().push((handle, payload, health));
             self.count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -166,9 +158,9 @@ impl CapturingSubjectAnnouncer {
     /// unaffected and still returns `Ok`.
     pub(crate) fn failing_with_invalid() -> Self {
         Self {
-            announce_return: Mutex::new(CaptureReturn::Err(
-                ReturnError::Invalid("test-configured failure".into()),
-            )),
+            announce_return: Mutex::new(CaptureReturn::Err(ReturnError::Invalid(
+                "test-configured failure".into(),
+            ))),
             ..Self::default()
         }
     }
@@ -187,9 +179,7 @@ impl SubjectAnnouncer for CapturingSubjectAnnouncer {
     fn announce<'a>(
         &'a self,
         announcement: SubjectAnnouncement,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>> {
         Box::pin(async move {
             let ret = self.announce_return.lock().unwrap().clone();
             self.announced.lock().unwrap().push(announcement);
@@ -205,14 +195,9 @@ impl SubjectAnnouncer for CapturingSubjectAnnouncer {
         &'a self,
         addressing: ExternalAddressing,
         reason: Option<String>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>> {
         Box::pin(async move {
-            self.retracted
-                .lock()
-                .unwrap()
-                .push((addressing, reason));
+            self.retracted.lock().unwrap().push((addressing, reason));
             Ok(())
         })
     }
@@ -243,9 +228,9 @@ impl CapturingRelationAnnouncer {
     /// always return `ReportError::Invalid`.
     pub(crate) fn failing_with_invalid() -> Self {
         Self {
-            assert_return: Mutex::new(CaptureReturn::Err(
-                ReturnError::Invalid("test-configured failure".into()),
-            )),
+            assert_return: Mutex::new(CaptureReturn::Err(ReturnError::Invalid(
+                "test-configured failure".into(),
+            ))),
             ..Self::default()
         }
     }
@@ -264,9 +249,7 @@ impl RelationAnnouncer for CapturingRelationAnnouncer {
     fn assert<'a>(
         &'a self,
         assertion: RelationAssertion,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>> {
         Box::pin(async move {
             let ret = self.assert_return.lock().unwrap().clone();
             self.asserted.lock().unwrap().push(assertion);
@@ -281,9 +264,7 @@ impl RelationAnnouncer for CapturingRelationAnnouncer {
     fn retract<'a>(
         &'a self,
         retraction: RelationRetraction,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + 'a>> {
         Box::pin(async move {
             self.retracted.lock().unwrap().push(retraction);
             Ok(())
@@ -373,8 +354,7 @@ pub(crate) async fn spawn_mock_mpd(
 ) -> (MpdEndpoint, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let endpoint =
-        MpdEndpoint::tcp(addr.ip().to_string(), addr.port()).unwrap();
+    let endpoint = MpdEndpoint::tcp(addr.ip().to_string(), addr.port()).unwrap();
     let task = tokio::spawn(async move {
         let mut iter = behaviours.into_iter();
         loop {
@@ -402,8 +382,7 @@ pub(crate) async fn spawn_mock_mpd(
 pub(crate) async fn spawn_unresponsive_mock() -> (MpdEndpoint, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let endpoint =
-        MpdEndpoint::tcp(addr.ip().to_string(), addr.port()).unwrap();
+    let endpoint = MpdEndpoint::tcp(addr.ip().to_string(), addr.port()).unwrap();
     let task = tokio::spawn(async move {
         loop {
             match listener.accept().await {
@@ -411,8 +390,7 @@ pub(crate) async fn spawn_unresponsive_mock() -> (MpdEndpoint, JoinHandle<()>) {
                     tokio::spawn(async move {
                         // Hold but do not write the welcome; the
                         // supervisor's welcome timeout fires.
-                        tokio::time::sleep(Duration::from_secs(60))
-                            .await;
+                        tokio::time::sleep(Duration::from_secs(60)).await;
                         drop(stream);
                     });
                 }
@@ -448,8 +426,7 @@ async fn serve_connection(mut stream: TcpStream, b: ConnBehaviour) {
                     Ok(_) => {}
                 }
                 if line.starts_with("idle") {
-                    let _ =
-                        w.write_all(b"changed: player\nOK\n").await;
+                    let _ = w.write_all(b"changed: player\nOK\n").await;
                     let _ = w.flush().await;
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     return;
@@ -480,8 +457,7 @@ async fn serve_connection(mut stream: TcpStream, b: ConnBehaviour) {
                 if line.starts_with("status") {
                     let _ = w.write_all(status_resp).await;
                 } else if line.starts_with("currentsong") {
-                    let _ =
-                        w.write_all(currentsong_resp.as_bytes()).await;
+                    let _ = w.write_all(currentsong_resp.as_bytes()).await;
                 } else if line.starts_with("idle") {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     return;
@@ -511,12 +487,8 @@ async fn serve_connection(mut stream: TcpStream, b: ConnBehaviour) {
                 } = b
                 {
                     if seq == nth {
-                        let cmd_name =
-                            line.split_whitespace().next().unwrap_or("");
-                        let ack = format!(
-                            "ACK [{}@0] {{{}}} {}\n",
-                            code, cmd_name, message
-                        );
+                        let cmd_name = line.split_whitespace().next().unwrap_or("");
+                        let ack = format!("ACK [{}@0] {{{}}} {}\n", code, cmd_name, message);
                         let _ = w.write_all(ack.as_bytes()).await;
                         let _ = w.flush().await;
                         continue;

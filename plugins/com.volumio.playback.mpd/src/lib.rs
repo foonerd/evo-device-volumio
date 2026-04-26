@@ -130,9 +130,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use evo_plugin_sdk::contract::{
-    Assignment, BuildInfo, CourseCorrection, CustodyHandle, HealthReport,
-    LoadContext, Plugin, PluginDescription, PluginError, PluginIdentity,
-    RelationAnnouncer, RuntimeCapabilities, SubjectAnnouncer, Warden,
+    Assignment, BuildInfo, CourseCorrection, CustodyHandle, HealthReport, LoadContext, Plugin,
+    PluginDescription, PluginError, PluginIdentity, RelationAnnouncer, RuntimeCapabilities,
+    SubjectAnnouncer, Warden,
 };
 use evo_plugin_sdk::Manifest;
 
@@ -173,8 +173,7 @@ pub fn manifest() -> Manifest {
 /// [`BuildInfo::plugin_build`], and `manifest.toml` `[plugin].version`
 /// must stay aligned (release tooling and tests assert this).
 fn plugin_crate_version() -> semver::Version {
-    semver::Version::parse(env!("CARGO_PKG_VERSION"))
-        .expect("CARGO_PKG_VERSION is valid semver")
+    semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver")
 }
 
 /// Per-custody state retained for the lifetime of a custody.
@@ -276,9 +275,8 @@ impl MpdPlaybackPlugin {
     /// construct the table directly). Does not change the
     /// `loaded` flag; that is the caller's responsibility.
     fn apply_config_table(&mut self, table: &toml::Table) -> Result<(), PluginError> {
-        let config = PluginConfig::from_toml_table(table).map_err(|e| {
-            PluginError::Permanent(format!("invalid plugin config: {e}"))
-        })?;
+        let config = PluginConfig::from_toml_table(table)
+            .map_err(|e| PluginError::Permanent(format!("invalid plugin config: {e}")))?;
         self.endpoint = config.endpoint;
         self.timeouts = config.timeouts;
         Ok(())
@@ -301,9 +299,7 @@ impl Default for MpdPlaybackPlugin {
 /// way on retry.
 fn parse_correction(correction: &CourseCorrection) -> Result<PlaybackCommand, PluginError> {
     let payload_str = std::str::from_utf8(&correction.payload).map_err(|_| {
-        PluginError::Permanent(
-            "course correction payload is not valid UTF-8".to_string(),
-        )
+        PluginError::Permanent("course correction payload is not valid UTF-8".to_string())
     })?;
     let trimmed = payload_str.trim();
 
@@ -376,22 +372,17 @@ fn parse_correction(correction: &CourseCorrection) -> Result<PlaybackCommand, Pl
 ///   release and re-take.
 fn playback_error_to_plugin_error(e: PlaybackError) -> PluginError {
     match e {
-        PlaybackError::Ack { code, message } => PluginError::Permanent(format!(
-            "MPD rejected command: [{}] {}",
-            code, message
+        PlaybackError::Ack { code, message } => {
+            PluginError::Permanent(format!("MPD rejected command: [{}] {}", code, message))
+        }
+        PlaybackError::ConnectionExhausted { attempts } => PluginError::Transient(format!(
+            "MPD unreachable after {} reconnect attempts",
+            attempts
         )),
-        PlaybackError::ConnectionExhausted { attempts } => {
-            PluginError::Transient(format!(
-                "MPD unreachable after {} reconnect attempts",
-                attempts
-            ))
+        err @ PlaybackError::Protocol(_) => PluginError::fatal("MPD protocol violation", err),
+        PlaybackError::Shutdown => {
+            PluginError::Permanent("playback supervisor is shut down".to_string())
         }
-        err @ PlaybackError::Protocol(_) => {
-            PluginError::fatal("MPD protocol violation", err)
-        }
-        PlaybackError::Shutdown => PluginError::Permanent(
-            "playback supervisor is shut down".to_string(),
-        ),
     }
 }
 
@@ -456,9 +447,7 @@ impl Plugin for MpdPlaybackPlugin {
         }
     }
 
-    fn unload(
-        &mut self,
-    ) -> impl Future<Output = Result<(), PluginError>> + Send + '_ {
+    fn unload(&mut self) -> impl Future<Output = Result<(), PluginError>> + Send + '_ {
         async move {
             let active = self.custodies.len();
             tracing::info!(
@@ -501,8 +490,7 @@ impl Warden for MpdPlaybackPlugin {
     fn take_custody<'a>(
         &'a mut self,
         assignment: Assignment,
-    ) -> impl Future<Output = Result<CustodyHandle, PluginError>> + Send + 'a
-    {
+    ) -> impl Future<Output = Result<CustodyHandle, PluginError>> + Send + 'a {
         async move {
             if !self.loaded {
                 return Err(PluginError::Permanent(
@@ -519,16 +507,12 @@ impl Warden for MpdPlaybackPlugin {
                 Some(e) => e.clone(),
                 None => {
                     return Err(PluginError::Permanent(
-                        "subject emitter not initialised; load() was not called"
-                            .to_string(),
+                        "subject emitter not initialised; load() was not called".to_string(),
                     ));
                 }
             };
 
-            let handle = CustodyHandle::new(format!(
-                "custody-{}",
-                assignment.correlation_id
-            ));
+            let handle = CustodyHandle::new(format!("custody-{}", assignment.correlation_id));
 
             // Spawn the supervisor. Opens two MPD connections,
             // emits the initial state report, returns a handle for
@@ -594,10 +578,7 @@ impl Warden for MpdPlaybackPlugin {
             let cmd = parse_correction(&correction)?;
 
             let tracked = self.custodies.get(&handle.id).ok_or_else(|| {
-                PluginError::Permanent(format!(
-                    "unknown custody handle: {}",
-                    handle.id
-                ))
+                PluginError::Permanent(format!("unknown custody handle: {}", handle.id))
             })?;
 
             self.corrections_dispatched += 1;
@@ -629,14 +610,9 @@ impl Warden for MpdPlaybackPlugin {
                 ));
             }
 
-            let tracked = self.custodies.remove(&handle.id).ok_or_else(
-                || {
-                    PluginError::Permanent(format!(
-                        "unknown custody handle: {}",
-                        handle.id
-                    ))
-                },
-            )?;
+            let tracked = self.custodies.remove(&handle.id).ok_or_else(|| {
+                PluginError::Permanent(format!("unknown custody handle: {}", handle.id))
+            })?;
 
             tracing::info!(
                 plugin = PLUGIN_NAME,
@@ -667,17 +643,14 @@ mod tests {
     use evo_plugin_sdk::contract::{CustodyStateReporter, HealthStatus};
 
     use crate::playback_supervisor::test_mock::{
-        capturing_emitter, spawn_mock_mpd, spawn_unresponsive_mock,
-        short_timeouts, CapturingReporter, ConnBehaviour,
+        capturing_emitter, short_timeouts, spawn_mock_mpd, spawn_unresponsive_mock,
+        CapturingReporter, ConnBehaviour,
     };
     use crate::playback_supervisor::SubjectEmitter;
 
     // ----- helpers -----
 
-    fn assignment(
-        reporter: Arc<dyn CustodyStateReporter>,
-        correlation_id: u64,
-    ) -> Assignment {
+    fn assignment(reporter: Arc<dyn CustodyStateReporter>, correlation_id: u64) -> Assignment {
         Assignment {
             custody_type: "playback-session".into(),
             payload: b"track-1".to_vec(),
@@ -687,11 +660,7 @@ mod tests {
         }
     }
 
-    fn correction(
-        correction_type: &str,
-        payload: &[u8],
-        correlation_id: u64,
-    ) -> CourseCorrection {
+    fn correction(correction_type: &str, payload: &[u8], correlation_id: u64) -> CourseCorrection {
         CourseCorrection {
             correction_type: correction_type.to_string(),
             payload: payload.to_vec(),
@@ -703,8 +672,7 @@ mod tests {
         behaviours: Vec<ConnBehaviour>,
     ) -> (MpdPlaybackPlugin, tokio::task::JoinHandle<()>) {
         let (endpoint, mock_task) = spawn_mock_mpd(behaviours).await;
-        let mut p =
-            MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
+        let mut p = MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
         p.loaded = true;
         // Tests using this helper are not exercising the subject
         // emission pipeline; equip a null emitter to satisfy
@@ -733,7 +701,10 @@ mod tests {
         let m = manifest();
         assert_eq!(d.identity.name, m.plugin.name);
         assert_eq!(d.identity.name, PLUGIN_NAME);
-        assert_eq!(d.identity.version, m.plugin.version, "CARGO_PKG_VERSION / describe() / manifest [plugin].version must match");
+        assert_eq!(
+            d.identity.version, m.plugin.version,
+            "CARGO_PKG_VERSION / describe() / manifest [plugin].version must match"
+        );
     }
 
     #[tokio::test]
@@ -774,10 +745,7 @@ mod tests {
     #[test]
     fn new_uses_default_endpoint_and_timeouts() {
         let p = MpdPlaybackPlugin::new();
-        assert_eq!(
-            p.endpoint,
-            MpdEndpoint::tcp("127.0.0.1", 6600).unwrap()
-        );
+        assert_eq!(p.endpoint, MpdEndpoint::tcp("127.0.0.1", 6600).unwrap());
         let d = ConnectTimeouts::default();
         assert_eq!(p.timeouts.connect, d.connect);
         assert_eq!(p.timeouts.welcome, d.welcome);
@@ -813,10 +781,7 @@ mod tests {
         .unwrap();
         p.apply_config_table(&table).unwrap();
 
-        assert_eq!(
-            p.endpoint,
-            MpdEndpoint::tcp("mpd.example", 6700).unwrap()
-        );
+        assert_eq!(p.endpoint, MpdEndpoint::tcp("mpd.example", 6700).unwrap());
     }
 
     #[test]
@@ -832,10 +797,7 @@ mod tests {
         .unwrap();
         p.apply_config_table(&table).unwrap();
 
-        assert_eq!(
-            p.endpoint,
-            MpdEndpoint::unix("/run/mpd/socket").unwrap()
-        );
+        assert_eq!(p.endpoint, MpdEndpoint::unix("/run/mpd/socket").unwrap());
     }
 
     #[test]
@@ -871,10 +833,7 @@ mod tests {
         assert!(matches!(e, PluginError::Permanent(_)));
 
         // Failed apply leaves state unchanged.
-        assert_eq!(
-            p.endpoint,
-            MpdEndpoint::tcp("127.0.0.1", 6600).unwrap()
-        );
+        assert_eq!(p.endpoint, MpdEndpoint::tcp("127.0.0.1", 6600).unwrap());
     }
 
     #[test]
@@ -908,8 +867,7 @@ mod tests {
     #[tokio::test]
     async fn take_custody_rejects_before_load() {
         let mut p = MpdPlaybackPlugin::new();
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let a = assignment(reporter, 1);
         let e = p.take_custody(a).await.unwrap_err();
         assert!(matches!(e, PluginError::Permanent(_)));
@@ -959,7 +917,10 @@ mod tests {
     #[test]
     fn parse_play_with_position() {
         let c = correction("play", b"3", 1);
-        assert_eq!(parse_correction(&c).unwrap(), PlaybackCommand::PlayPosition(3));
+        assert_eq!(
+            parse_correction(&c).unwrap(),
+            PlaybackCommand::PlayPosition(3)
+        );
     }
 
     #[test]
@@ -1015,7 +976,10 @@ mod tests {
     #[test]
     fn parse_set_volume() {
         let c = correction("set_volume", b"50", 1);
-        assert_eq!(parse_correction(&c).unwrap(), PlaybackCommand::SetVolume(50));
+        assert_eq!(
+            parse_correction(&c).unwrap(),
+            PlaybackCommand::SetVolume(50)
+        );
     }
 
     #[test]
@@ -1095,17 +1059,14 @@ mod tests {
 
     #[test]
     fn exhausted_maps_to_transient() {
-        let e = playback_error_to_plugin_error(
-            PlaybackError::ConnectionExhausted { attempts: 10 },
-        );
+        let e = playback_error_to_plugin_error(PlaybackError::ConnectionExhausted { attempts: 10 });
         assert!(matches!(e, PluginError::Transient(_)));
     }
 
     #[test]
     fn protocol_maps_to_fatal() {
-        let e = playback_error_to_plugin_error(PlaybackError::Protocol(
-            "unexpected token".to_string(),
-        ));
+        let e =
+            playback_error_to_plugin_error(PlaybackError::Protocol("unexpected token".to_string()));
         assert!(e.is_fatal());
     }
 
@@ -1151,8 +1112,7 @@ mod tests {
         p.loaded = true;
         p.subject_emitter = Some(SubjectEmitter::null());
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let e = p.take_custody(assignment(reporter, 1)).await.unwrap_err();
         assert!(
             matches!(e, PluginError::Transient(_)),
@@ -1170,8 +1130,7 @@ mod tests {
         ])
         .await;
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let handle = p.take_custody(assignment(reporter, 7)).await.unwrap();
 
         p.course_correct(&handle, correction("play", b"", 99))
@@ -1194,8 +1153,7 @@ mod tests {
         ])
         .await;
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let handle = p.take_custody(assignment(reporter, 11)).await.unwrap();
 
         let e = p
@@ -1218,8 +1176,7 @@ mod tests {
         ])
         .await;
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let handle = p.take_custody(assignment(reporter, 5)).await.unwrap();
         assert_eq!(p.active_custody_count(), 1);
 
@@ -1238,10 +1195,8 @@ mod tests {
         ])
         .await;
 
-        let reporter_a: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
-        let reporter_b: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter_a: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
+        let reporter_b: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
 
         let _h1 = p.take_custody(assignment(reporter_a, 100)).await.unwrap();
         let _h2 = p.take_custody(assignment(reporter_b, 200)).await.unwrap();
@@ -1272,8 +1227,7 @@ mod tests {
         p.loaded = true;
         // subject_emitter is intentionally left as None.
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let e = p.take_custody(assignment(reporter, 1)).await.unwrap_err();
         match e {
             PluginError::Permanent(msg) => {
@@ -1307,10 +1261,8 @@ mod tests {
         let (subjects, relations, emitter) = capturing_emitter();
         p.subject_emitter = Some(emitter);
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
-        let handle =
-            p.take_custody(assignment(reporter, 77)).await.unwrap();
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
+        let handle = p.take_custody(assignment(reporter, 77)).await.unwrap();
 
         // Initial emission from spawn's emit_initial_report.
         assert_eq!(subjects.count(), 2, "track + album at take-custody");
@@ -1348,8 +1300,7 @@ mod tests {
         let (subjects, relations, emitter) = capturing_emitter();
         p.subject_emitter = Some(emitter);
 
-        let reporter: Arc<dyn CustodyStateReporter> =
-            Arc::new(CapturingReporter::default());
+        let reporter: Arc<dyn CustodyStateReporter> = Arc::new(CapturingReporter::default());
         let handle = p.take_custody(assignment(reporter, 9)).await.unwrap();
 
         // Standard mock returns empty currentsong; no subjects.

@@ -368,8 +368,7 @@ mod tests {
     /// Parse a config from a TOML source string. Test-only
     /// convenience wrapper over [`PluginConfig::from_toml_table`].
     fn parse(src: &str) -> Result<PluginConfig, ConfigError> {
-        let table: toml::Table =
-            src.parse().expect("test input must be valid TOML");
+        let table: toml::Table = src.parse().expect("test input must be valid TOML");
         PluginConfig::from_toml_table(&table)
     }
 
@@ -378,10 +377,7 @@ mod tests {
     #[test]
     fn defaults_returns_expected_endpoint_and_timeouts() {
         let c = PluginConfig::defaults();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("127.0.0.1", 6600).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("127.0.0.1", 6600).unwrap());
         let dt = ConnectTimeouts::default();
         assert_eq!(c.timeouts.connect, dt.connect);
         assert_eq!(c.timeouts.welcome, dt.welcome);
@@ -409,10 +405,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("mpd.example", 6700).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("mpd.example", 6700).unwrap());
     }
 
     #[test]
@@ -425,10 +418,7 @@ mod tests {
         )
         .unwrap();
         // type defaults to tcp; port defaults to 6600.
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("mpd.example", 6600).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("mpd.example", 6600).unwrap());
     }
 
     #[test]
@@ -440,10 +430,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("127.0.0.1", 7000).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("127.0.0.1", 7000).unwrap());
     }
 
     #[test]
@@ -456,10 +443,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::unix("/run/mpd/socket").unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::unix("/run/mpd/socket").unwrap());
     }
 
     #[test]
@@ -534,10 +518,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("mpd.example", 6600).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("mpd.example", 6600).unwrap());
     }
 
     #[test]
@@ -550,10 +531,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(
-            c.endpoint,
-            MpdEndpoint::tcp("mpd.example", 6600).unwrap()
-        );
+        assert_eq!(c.endpoint, MpdEndpoint::tcp("mpd.example", 6600).unwrap());
     }
 
     #[test]
@@ -580,10 +558,7 @@ mod tests {
         "#,
         )
         .unwrap_err();
-        assert_eq!(
-            e,
-            ConfigError::UnknownEndpointType("websocket".to_string())
-        );
+        assert_eq!(e, ConfigError::UnknownEndpointType("websocket".to_string()));
     }
 
     #[test]
@@ -674,10 +649,7 @@ mod tests {
         "#,
         )
         .unwrap_err();
-        assert_eq!(
-            e,
-            ConfigError::RelativePath("run/mpd/socket".to_string())
-        );
+        assert_eq!(e, ConfigError::RelativePath("run/mpd/socket".to_string()));
     }
 
     #[test]

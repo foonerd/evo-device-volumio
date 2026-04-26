@@ -60,10 +60,7 @@ use tokio::task::JoinHandle;
 
 use evo_plugin_sdk::contract::{CustodyHandle, CustodyStateReporter, HealthStatus};
 
-use crate::mpd::{
-    ConnectTimeouts, IdleSubsystem, MpdConnection, MpdEndpoint, MpdError,
-    MpdSong,
-};
+use crate::mpd::{ConnectTimeouts, IdleSubsystem, MpdConnection, MpdEndpoint, MpdError, MpdSong};
 use crate::PLUGIN_NAME;
 
 use super::command::{PlaybackCommand, PlaybackError};
@@ -116,10 +113,7 @@ impl SupervisorHandle {
     /// Dispatch a command. Returns once the supervisor has either
     /// executed the command, surfaced an ACK, reached the
     /// reconnection limit, or shut down.
-    pub(crate) async fn command(
-        &self,
-        cmd: PlaybackCommand,
-    ) -> Result<(), PlaybackError> {
+    pub(crate) async fn command(&self, cmd: PlaybackCommand) -> Result<(), PlaybackError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
             .send(SupervisorMessage::Command {
@@ -176,18 +170,12 @@ pub(crate) async fn spawn(
         "spawning playback supervisor"
     );
 
-    let mut cmd_conn = MpdConnection::connect_with_timeouts(
-        endpoint.clone(),
-        timeouts,
-    )
-    .await
-    .map_err(classify_connect_error)?;
-    let idle_conn = MpdConnection::connect_with_timeouts(
-        endpoint.clone(),
-        timeouts,
-    )
-    .await
-    .map_err(classify_connect_error)?;
+    let mut cmd_conn = MpdConnection::connect_with_timeouts(endpoint.clone(), timeouts)
+        .await
+        .map_err(classify_connect_error)?;
+    let idle_conn = MpdConnection::connect_with_timeouts(endpoint.clone(), timeouts)
+        .await
+        .map_err(classify_connect_error)?;
 
     // Initial report: failure here means MPD is unusable, so bail
     // before spawning anything. The same query populates
@@ -205,11 +193,9 @@ pub(crate) async fn spawn(
     )
     .await?;
 
-    let (command_tx, command_rx) =
-        mpsc::channel::<SupervisorMessage>(COMMAND_CHANNEL_CAPACITY);
+    let (command_tx, command_rx) = mpsc::channel::<SupervisorMessage>(COMMAND_CHANNEL_CAPACITY);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let (idle_tx, idle_rx) =
-        mpsc::channel::<IdleEvent>(IDLE_CHANNEL_CAPACITY);
+    let (idle_tx, idle_rx) = mpsc::channel::<IdleEvent>(IDLE_CHANNEL_CAPACITY);
 
     let idle_endpoint = endpoint.clone();
     tokio::spawn(idle_task(idle_conn, idle_endpoint, timeouts, idle_tx));
@@ -230,11 +216,7 @@ pub(crate) async fn spawn(
         subject_emitter,
         last_emitted_file,
     };
-    let task_handle = tokio::spawn(task_state.run(
-        command_rx,
-        shutdown_rx,
-        idle_rx,
-    ));
+    let task_handle = tokio::spawn(task_state.run(command_rx, shutdown_rx, idle_rx));
 
     Ok(SupervisorHandle {
         command_tx,
@@ -453,12 +435,7 @@ async fn handle_command(
         };
         tokio::time::sleep(delay).await;
 
-        match MpdConnection::connect_with_timeouts(
-            endpoint.clone(),
-            timeouts,
-        )
-        .await
-        {
+        match MpdConnection::connect_with_timeouts(endpoint.clone(), timeouts).await {
             Ok(new_conn) => {
                 *cmd_conn = new_conn;
                 tracing::info!(
@@ -515,28 +492,18 @@ fn classify_connect_error(e: MpdError) -> PlaybackError {
         MpdError::Transport(_) | MpdError::Timeout { .. } => {
             PlaybackError::ConnectionExhausted { attempts: 1 }
         }
-        MpdError::Protocol(_) | MpdError::Config(_) => {
-            PlaybackError::Protocol(format!("{}", e))
-        }
-        MpdError::Ack { code, message, .. } => {
-            PlaybackError::Ack { code, message }
-        }
+        MpdError::Protocol(_) | MpdError::Config(_) => PlaybackError::Protocol(format!("{}", e)),
+        MpdError::Ack { code, message, .. } => PlaybackError::Ack { code, message },
     }
 }
 
 fn classify_command_error(e: MpdError) -> PlaybackError {
     match e {
-        MpdError::Ack { code, message, .. } => {
-            PlaybackError::Ack { code, message }
-        }
-        MpdError::Transport(_) | MpdError::Timeout { .. } => {
-            PlaybackError::ConnectionExhausted {
-                attempts: RECONNECT_MAX_ATTEMPTS,
-            }
-        }
-        MpdError::Protocol(_) | MpdError::Config(_) => {
-            PlaybackError::Protocol(format!("{}", e))
-        }
+        MpdError::Ack { code, message, .. } => PlaybackError::Ack { code, message },
+        MpdError::Transport(_) | MpdError::Timeout { .. } => PlaybackError::ConnectionExhausted {
+            attempts: RECONNECT_MAX_ATTEMPTS,
+        },
+        MpdError::Protocol(_) | MpdError::Config(_) => PlaybackError::Protocol(format!("{}", e)),
     }
 }
 
@@ -571,8 +538,7 @@ async fn emit_initial_report(
             "initial state report delivery failed; spawn proceeds anyway"
         );
     }
-    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file)
-        .await;
+    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file).await;
     Ok(())
 }
 
@@ -621,8 +587,7 @@ async fn emit_best_effort_report(
             "state report delivery failed"
         );
     }
-    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file)
-        .await;
+    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file).await;
 }
 
 /// Invoke the [`SubjectEmitter`] for a song if (and only if) its
@@ -693,12 +658,7 @@ async fn idle_task(
                         None => break None,
                     };
                     tokio::time::sleep(delay).await;
-                    match MpdConnection::connect_with_timeouts(
-                        endpoint.clone(),
-                        timeouts,
-                    )
-                    .await
-                    {
+                    match MpdConnection::connect_with_timeouts(endpoint.clone(), timeouts).await {
                         Ok(c) => break Some(c),
                         Err(err) => {
                             tracing::debug!(
@@ -714,10 +674,7 @@ async fn idle_task(
                 match reconnected {
                     Some(c) => {
                         idle_conn = c;
-                        tracing::info!(
-                            plugin = PLUGIN_NAME,
-                            "idle connection re-established"
-                        );
+                        tracing::info!(plugin = PLUGIN_NAME, "idle connection re-established");
                     }
                     None => {
                         let _ = tx.send(IdleEvent::Exhausted).await;
@@ -742,8 +699,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::super::test_mock::{
-        capturing_emitter, spawn_mock_mpd, short_timeouts,
-        test_custody_handle, CapturingReporter, ConnBehaviour,
+        capturing_emitter, short_timeouts, spawn_mock_mpd, test_custody_handle, CapturingReporter,
+        ConnBehaviour,
     };
 
     // ----- backoff unit tests -----
@@ -875,10 +832,7 @@ mod tests {
         .await
         .unwrap();
 
-        let err = handle
-            .command(PlaybackCommand::Play)
-            .await
-            .unwrap_err();
+        let err = handle.command(PlaybackCommand::Play).await.unwrap_err();
         match err {
             PlaybackError::Ack { code, message } => {
                 assert_eq!(code, 2);
@@ -1034,18 +988,12 @@ mod tests {
         let track = subjects.at(0).unwrap();
         assert_eq!(track.subject_type, "track");
         assert_eq!(track.addressings[0].scheme, "mpd-path");
-        assert_eq!(
-            track.addressings[0].value,
-            "library/pf/thewall/01.flac"
-        );
+        assert_eq!(track.addressings[0].value, "library/pf/thewall/01.flac");
 
         let album = subjects.at(1).unwrap();
         assert_eq!(album.subject_type, "album");
         assert_eq!(album.addressings[0].scheme, "mpd-album");
-        assert_eq!(
-            album.addressings[0].value,
-            "Pink Floyd|The Wall"
-        );
+        assert_eq!(album.addressings[0].value, "Pink Floyd|The Wall");
 
         handle.shutdown().await;
     }

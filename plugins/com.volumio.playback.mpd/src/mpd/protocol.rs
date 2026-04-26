@@ -70,17 +70,15 @@ pub(crate) struct Field {
 /// every argument is validated to reject `\n`, `\r`, and NUL (none
 /// can be represented on the wire). Arguments are uniformly quoted
 /// to avoid a "does this one need quoting" dance at the call site.
-pub(crate) fn serialise_command(
-    command: &str,
-    args: &[&str],
-) -> Result<Vec<u8>, ProtocolError> {
+pub(crate) fn serialise_command(command: &str, args: &[&str]) -> Result<Vec<u8>, ProtocolError> {
     for ch in command.chars() {
         if ch == '\n' || ch == '\r' || ch == '\0' {
             return Err(ProtocolError::CommandForbiddenChar { ch });
         }
     }
 
-    let mut out = Vec::with_capacity(command.len() + args.iter().map(|a| a.len() + 3).sum::<usize>() + 2);
+    let mut out =
+        Vec::with_capacity(command.len() + args.iter().map(|a| a.len() + 3).sum::<usize>() + 2);
     out.extend_from_slice(command.as_bytes());
 
     for arg in args {
@@ -280,25 +278,37 @@ mod tests {
     #[test]
     fn serialise_command_rejects_newline_in_command() {
         let err = serialise_command("bad\ncommand", &[]).unwrap_err();
-        assert!(matches!(err, ProtocolError::CommandForbiddenChar { ch: '\n' }));
+        assert!(matches!(
+            err,
+            ProtocolError::CommandForbiddenChar { ch: '\n' }
+        ));
     }
 
     #[test]
     fn serialise_command_rejects_newline_in_arg() {
         let err = serialise_command("add", &["line1\nline2"]).unwrap_err();
-        assert!(matches!(err, ProtocolError::CommandForbiddenChar { ch: '\n' }));
+        assert!(matches!(
+            err,
+            ProtocolError::CommandForbiddenChar { ch: '\n' }
+        ));
     }
 
     #[test]
     fn serialise_command_rejects_cr_in_arg() {
         let err = serialise_command("add", &["line1\rline2"]).unwrap_err();
-        assert!(matches!(err, ProtocolError::CommandForbiddenChar { ch: '\r' }));
+        assert!(matches!(
+            err,
+            ProtocolError::CommandForbiddenChar { ch: '\r' }
+        ));
     }
 
     #[test]
     fn serialise_command_rejects_nul_in_arg() {
         let err = serialise_command("add", &["a\0b"]).unwrap_err();
-        assert!(matches!(err, ProtocolError::CommandForbiddenChar { ch: '\0' }));
+        assert!(matches!(
+            err,
+            ProtocolError::CommandForbiddenChar { ch: '\0' }
+        ));
     }
 
     // ----- welcome parsing -----

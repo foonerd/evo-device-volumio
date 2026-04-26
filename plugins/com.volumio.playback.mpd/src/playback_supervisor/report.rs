@@ -420,9 +420,7 @@ mod tests {
         for line in out.lines() {
             // Either a key = value line, a [table] header, or empty.
             assert!(
-                line.is_empty()
-                    || line.starts_with('[')
-                    || line.contains('='),
+                line.is_empty() || line.starts_with('[') || line.contains('='),
                 "suspicious line: {:?}",
                 line
             );

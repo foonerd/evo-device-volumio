@@ -62,10 +62,7 @@ impl Default for ConnectTimeouts {
 /// construct a new one. Phase 3.2b will wrap this in a supervisor
 /// that does the reconnection automatically.
 pub(crate) struct MpdConnection {
-    framing: Framing<
-        Box<dyn AsyncRead + Send + Unpin>,
-        Box<dyn AsyncWrite + Send + Unpin>,
-    >,
+    framing: Framing<Box<dyn AsyncRead + Send + Unpin>, Box<dyn AsyncWrite + Send + Unpin>>,
     version: MpdVersion,
     endpoint: MpdEndpoint,
     connected_at: Instant,
@@ -337,11 +334,7 @@ impl MpdConnection {
     // ----- internal dispatch -----
 
     /// Send a command and collect its body fields until OK or ACK.
-    async fn dispatch(
-        &mut self,
-        command: &str,
-        args: &[&str],
-    ) -> Result<Vec<Field>, MpdError> {
+    async fn dispatch(&mut self, command: &str, args: &[&str]) -> Result<Vec<Field>, MpdError> {
         let bytes = protocol::serialise_command(command, args)?;
 
         tracing::debug!(
@@ -761,9 +754,7 @@ mod tests {
         handshake(Box::new(r), Box::new(w), fake_endpoint(), short_timeouts()).await
     }
 
-    async fn handshake_for_exchange(
-        client: tokio::io::DuplexStream,
-    ) -> MpdConnection {
+    async fn handshake_for_exchange(client: tokio::io::DuplexStream) -> MpdConnection {
         let (r, w) = tokio::io::split(client);
         handshake(Box::new(r), Box::new(w), fake_endpoint(), short_timeouts())
             .await
@@ -787,7 +778,10 @@ mod tests {
         let err = handshake_from_duplex(server, client, b"NOT A WELCOME\n")
             .await
             .unwrap_err();
-        assert!(matches!(err, MpdError::Protocol(ProtocolError::BadWelcome(_))));
+        assert!(matches!(
+            err,
+            MpdError::Protocol(ProtocolError::BadWelcome(_))
+        ));
     }
 
     #[tokio::test]
@@ -796,7 +790,10 @@ mod tests {
         let err = handshake_from_duplex(server, client, b"OK MPD something\n")
             .await
             .unwrap_err();
-        assert!(matches!(err, MpdError::Protocol(ProtocolError::BadVersion(_))));
+        assert!(matches!(
+            err,
+            MpdError::Protocol(ProtocolError::BadVersion(_))
+        ));
     }
 
     #[tokio::test]
@@ -804,18 +801,10 @@ mod tests {
         let (server, client) = duplex(1024);
         drop(server);
         let (r, w) = tokio::io::split(client);
-        let err = handshake(
-            Box::new(r),
-            Box::new(w),
-            fake_endpoint(),
-            short_timeouts(),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            MpdError::Transport(TransportError::Closed)
-        ));
+        let err = handshake(Box::new(r), Box::new(w), fake_endpoint(), short_timeouts())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, MpdError::Transport(TransportError::Closed)));
     }
 
     // ----- status dispatch -----
@@ -841,11 +830,7 @@ mod tests {
     #[tokio::test]
     async fn status_handles_volume_minus_one_as_unknown() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"volume: -1\nstate: stop\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"volume: -1\nstate: stop\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
 
         let s = conn.status().await.unwrap();
@@ -857,11 +842,7 @@ mod tests {
     #[tokio::test]
     async fn status_reports_pause_state() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"state: pause\nsong: 0\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"state: pause\nsong: 0\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
 
         let s = conn.status().await.unwrap();
@@ -871,11 +852,7 @@ mod tests {
     #[tokio::test]
     async fn status_errors_on_unknown_play_state() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"state: wibbling\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"state: wibbling\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
 
         let err = conn.status().await.unwrap_err();
@@ -888,11 +865,7 @@ mod tests {
     #[tokio::test]
     async fn status_errors_when_state_field_missing() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"volume: 50\nsong: 3\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"volume: 50\nsong: 3\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
 
         let err = conn.status().await.unwrap_err();
@@ -914,7 +887,12 @@ mod tests {
 
         let err = conn.status().await.unwrap_err();
         match err {
-            MpdError::Ack { code, command, message, .. } => {
+            MpdError::Ack {
+                code,
+                command,
+                message,
+                ..
+            } => {
                 assert_eq!(code, 2);
                 assert_eq!(command, "status");
                 assert_eq!(message, "Bad argument");
@@ -1093,7 +1071,12 @@ mod tests {
 
         let err = conn.play_position(999).await.unwrap_err();
         match err {
-            MpdError::Ack { code, command, message, .. } => {
+            MpdError::Ack {
+                code,
+                command,
+                message,
+                ..
+            } => {
                 assert_eq!(code, 2);
                 assert_eq!(command, "play");
                 assert_eq!(message, "Bad song index");
@@ -1124,8 +1107,7 @@ mod tests {
     #[tokio::test]
     async fn idle_with_empty_subsystems_sends_bare_idle() {
         let (server, client) = duplex(4096);
-        let rx =
-            spawn_capturing_exchange(server, b"OK MPD 0.23.5\n", b"changed: player\nOK\n");
+        let rx = spawn_capturing_exchange(server, b"OK MPD 0.23.5\n", b"changed: player\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
         let _ = conn.idle(&[], Duration::from_millis(500)).await.unwrap();
         let captured = rx.await.unwrap();
@@ -1135,11 +1117,7 @@ mod tests {
     #[tokio::test]
     async fn idle_with_subsystems_sends_quoted_names() {
         let (server, client) = duplex(4096);
-        let rx = spawn_capturing_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"changed: player\nOK\n",
-        );
+        let rx = spawn_capturing_exchange(server, b"OK MPD 0.23.5\n", b"changed: player\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
         let _ = conn
             .idle(
@@ -1155,16 +1133,9 @@ mod tests {
     #[tokio::test]
     async fn idle_returns_single_changed_subsystem() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"changed: player\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"changed: player\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
-        let changed = conn
-            .idle(&[], Duration::from_millis(500))
-            .await
-            .unwrap();
+        let changed = conn.idle(&[], Duration::from_millis(500)).await.unwrap();
         assert_eq!(changed, vec![IdleSubsystem::Player]);
     }
 
@@ -1177,10 +1148,7 @@ mod tests {
             b"changed: player\nchanged: mixer\nchanged: playlist\nOK\n",
         );
         let mut conn = handshake_for_exchange(client).await;
-        let changed = conn
-            .idle(&[], Duration::from_millis(500))
-            .await
-            .unwrap();
+        let changed = conn.idle(&[], Duration::from_millis(500)).await.unwrap();
         assert_eq!(
             changed,
             vec![
@@ -1200,26 +1168,16 @@ mod tests {
         let (server, client) = duplex(4096);
         spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"OK\n");
         let mut conn = handshake_for_exchange(client).await;
-        let changed = conn
-            .idle(&[], Duration::from_millis(500))
-            .await
-            .unwrap();
+        let changed = conn.idle(&[], Duration::from_millis(500)).await.unwrap();
         assert!(changed.is_empty());
     }
 
     #[tokio::test]
     async fn idle_preserves_unknown_subsystem_as_other_variant() {
         let (server, client) = duplex(4096);
-        spawn_scripted_exchange(
-            server,
-            b"OK MPD 0.23.5\n",
-            b"changed: future_thing\nOK\n",
-        );
+        spawn_scripted_exchange(server, b"OK MPD 0.23.5\n", b"changed: future_thing\nOK\n");
         let mut conn = handshake_for_exchange(client).await;
-        let changed = conn
-            .idle(&[], Duration::from_millis(500))
-            .await
-            .unwrap();
+        let changed = conn.idle(&[], Duration::from_millis(500)).await.unwrap();
         assert_eq!(
             changed,
             vec![IdleSubsystem::Other("future_thing".to_string())]
@@ -1315,10 +1273,7 @@ mod tests {
     #[tokio::test]
     async fn connect_works_over_real_unix_socket() {
         let dir = std::env::temp_dir();
-        let path: PathBuf = dir.join(format!(
-            "evo-volumio-mpd-test-{}.sock",
-            std::process::id()
-        ));
+        let path: PathBuf = dir.join(format!("evo-volumio-mpd-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
 
         let listener = UnixListener::bind(&path).unwrap();
@@ -1386,9 +1341,18 @@ mod tests {
     #[test]
     fn parse_status_ignores_unknown_fields() {
         let fields = vec![
-            Field { key: "state".into(), value: "play".into() },
-            Field { key: "unknown_field".into(), value: "value".into() },
-            Field { key: "xfade".into(), value: "2".into() },
+            Field {
+                key: "state".into(),
+                value: "play".into(),
+            },
+            Field {
+                key: "unknown_field".into(),
+                value: "value".into(),
+            },
+            Field {
+                key: "xfade".into(),
+                value: "2".into(),
+            },
         ];
         let s = parse_status(&fields).unwrap();
         assert_eq!(s.state, PlayState::Playing);

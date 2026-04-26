@@ -65,8 +65,7 @@
 use std::sync::Arc;
 
 use evo_plugin_sdk::contract::{
-    ExternalAddressing, RelationAnnouncer, RelationAssertion,
-    SubjectAnnouncement, SubjectAnnouncer,
+    ExternalAddressing, RelationAnnouncer, RelationAssertion, SubjectAnnouncement, SubjectAnnouncer,
 };
 
 use crate::mpd::MpdSong;
@@ -123,7 +122,10 @@ impl SubjectEmitter {
         subjects: Arc<dyn SubjectAnnouncer>,
         relations: Arc<dyn RelationAnnouncer>,
     ) -> Self {
-        Self { subjects, relations }
+        Self {
+            subjects,
+            relations,
+        }
     }
 
     /// Emit track + album + relation for a song.
@@ -141,12 +143,9 @@ impl SubjectEmitter {
             return;
         }
 
-        let track_addressing =
-            ExternalAddressing::new(SCHEME_MPD_PATH, &song.file_path);
-        let track_announcement = SubjectAnnouncement::new(
-            SUBJECT_TYPE_TRACK,
-            vec![track_addressing.clone()],
-        );
+        let track_addressing = ExternalAddressing::new(SCHEME_MPD_PATH, &song.file_path);
+        let track_announcement =
+            SubjectAnnouncement::new(SUBJECT_TYPE_TRACK, vec![track_addressing.clone()]);
 
         if let Err(e) = self.subjects.announce(track_announcement).await {
             tracing::warn!(
@@ -174,12 +173,9 @@ impl SubjectEmitter {
         };
 
         let album_value = build_album_value(song.artist.as_deref(), album_name);
-        let album_addressing =
-            ExternalAddressing::new(SCHEME_MPD_ALBUM, album_value);
-        let album_announcement = SubjectAnnouncement::new(
-            SUBJECT_TYPE_ALBUM,
-            vec![album_addressing.clone()],
-        );
+        let album_addressing = ExternalAddressing::new(SCHEME_MPD_ALBUM, album_value);
+        let album_announcement =
+            SubjectAnnouncement::new(SUBJECT_TYPE_ALBUM, vec![album_addressing.clone()]);
 
         if let Err(e) = self.subjects.announce(album_announcement).await {
             tracing::warn!(
@@ -191,11 +187,8 @@ impl SubjectEmitter {
             return;
         }
 
-        let relation = RelationAssertion::new(
-            track_addressing,
-            PREDICATE_ALBUM_OF,
-            album_addressing,
-        );
+        let relation =
+            RelationAssertion::new(track_addressing, PREDICATE_ALBUM_OF, album_addressing);
 
         if let Err(e) = self.relations.assert(relation).await {
             tracing::warn!(
@@ -212,9 +205,7 @@ impl SubjectEmitter {
 /// known album name. Empty artist collapses to the UNKNOWN_ARTIST
 /// sentinel so the compound value is always a well-formed pair.
 fn build_album_value(artist: Option<&str>, album: &str) -> String {
-    let artist = artist
-        .filter(|s| !s.is_empty())
-        .unwrap_or(UNKNOWN_ARTIST);
+    let artist = artist.filter(|s| !s.is_empty()).unwrap_or(UNKNOWN_ARTIST);
     format!("{}{}{}", artist, ALBUM_ADDRESSING_SEPARATOR, album)
 }
 
@@ -246,9 +237,8 @@ impl SubjectAnnouncer for NullSubjectAnnouncer {
         _: SubjectAnnouncement,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<
-                    Output = Result<(), evo_plugin_sdk::contract::ReportError>,
-                > + Send
+            dyn std::future::Future<Output = Result<(), evo_plugin_sdk::contract::ReportError>>
+                + Send
                 + 'a,
         >,
     > {
@@ -261,9 +251,8 @@ impl SubjectAnnouncer for NullSubjectAnnouncer {
         _: Option<String>,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<
-                    Output = Result<(), evo_plugin_sdk::contract::ReportError>,
-                > + Send
+            dyn std::future::Future<Output = Result<(), evo_plugin_sdk::contract::ReportError>>
+                + Send
                 + 'a,
         >,
     > {
@@ -281,9 +270,8 @@ impl RelationAnnouncer for NullRelationAnnouncer {
         _: RelationAssertion,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<
-                    Output = Result<(), evo_plugin_sdk::contract::ReportError>,
-                > + Send
+            dyn std::future::Future<Output = Result<(), evo_plugin_sdk::contract::ReportError>>
+                + Send
                 + 'a,
         >,
     > {
@@ -295,9 +283,8 @@ impl RelationAnnouncer for NullRelationAnnouncer {
         _: evo_plugin_sdk::contract::RelationRetraction,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<
-                    Output = Result<(), evo_plugin_sdk::contract::ReportError>,
-                > + Send
+            dyn std::future::Future<Output = Result<(), evo_plugin_sdk::contract::ReportError>>
+                + Send
                 + 'a,
         >,
     > {
@@ -313,8 +300,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::playback_supervisor::test_mock::{
-        capturing_emitter, CapturingRelationAnnouncer,
-        CapturingSubjectAnnouncer,
+        capturing_emitter, CapturingRelationAnnouncer, CapturingSubjectAnnouncer,
     };
 
     fn song_with(
@@ -344,28 +330,19 @@ mod tests {
 
     #[test]
     fn build_album_value_uses_unknown_when_artist_none() {
-        assert_eq!(
-            build_album_value(None, "The Wall"),
-            "unknown|The Wall"
-        );
+        assert_eq!(build_album_value(None, "The Wall"), "unknown|The Wall");
     }
 
     #[test]
     fn build_album_value_uses_unknown_when_artist_empty() {
-        assert_eq!(
-            build_album_value(Some(""), "The Wall"),
-            "unknown|The Wall"
-        );
+        assert_eq!(build_album_value(Some(""), "The Wall"), "unknown|The Wall");
     }
 
     #[test]
     fn build_album_value_preserves_unusual_characters_in_album() {
         // Pipes in album titles are rare but valid; they produce
         // an unusual-but-stable compound value.
-        assert_eq!(
-            build_album_value(Some("A"), "B|C"),
-            "A|B|C"
-        );
+        assert_eq!(build_album_value(Some("A"), "B|C"), "A|B|C");
     }
 
     // ===== emit_song acceptance paths =====
@@ -391,10 +368,7 @@ mod tests {
         assert_eq!(track.subject_type, "track");
         assert_eq!(track.addressings.len(), 1);
         assert_eq!(track.addressings[0].scheme, "mpd-path");
-        assert_eq!(
-            track.addressings[0].value,
-            "library/pf/thewall/01.flac"
-        );
+        assert_eq!(track.addressings[0].value, "library/pf/thewall/01.flac");
 
         // Inspect the album announcement.
         let album = subjects.at(1).unwrap();
@@ -517,9 +491,7 @@ mod tests {
     async fn emit_song_with_empty_file_path_emits_nothing() {
         let (subjects, relations, emitter) = capturing_emitter();
 
-        emitter
-            .emit_song(&song_with("", None, None, None))
-            .await;
+        emitter.emit_song(&song_with("", None, None, None)).await;
 
         assert_eq!(subjects.count(), 0);
         assert_eq!(relations.count(), 0);
@@ -532,12 +504,7 @@ mod tests {
         let (subjects, _relations, emitter) = capturing_emitter();
 
         emitter
-            .emit_song(&song_with(
-                "a.flac",
-                None,
-                Some("A"),
-                Some("B"),
-            ))
+            .emit_song(&song_with("a.flac", None, Some("A"), Some("B")))
             .await;
 
         assert_eq!(subjects.at(0).unwrap().subject_type, "track");
@@ -549,12 +516,7 @@ mod tests {
         let (subjects, relations, emitter) = capturing_emitter();
 
         emitter
-            .emit_song(&song_with(
-                "a.flac",
-                None,
-                Some("A"),
-                Some("B"),
-            ))
+            .emit_song(&song_with("a.flac", None, Some("A"), Some("B")))
             .await;
 
         // The capturing announcers record in call order across
@@ -569,24 +531,14 @@ mod tests {
     async fn emit_song_swallows_subject_announce_errors() {
         use std::sync::Arc;
 
-        let failing_subjects = Arc::new(
-            CapturingSubjectAnnouncer::failing_with_invalid(),
-        );
+        let failing_subjects = Arc::new(CapturingSubjectAnnouncer::failing_with_invalid());
         let relations = Arc::new(CapturingRelationAnnouncer::default());
 
-        let emitter = SubjectEmitter::new(
-            failing_subjects.clone(),
-            relations.clone(),
-        );
+        let emitter = SubjectEmitter::new(failing_subjects.clone(), relations.clone());
 
         // Must not panic, must not propagate.
         emitter
-            .emit_song(&song_with(
-                "a.flac",
-                None,
-                Some("A"),
-                Some("B"),
-            ))
+            .emit_song(&song_with("a.flac", None, Some("A"), Some("B")))
             .await;
 
         // Because the track announcement failed, no album or
@@ -599,24 +551,14 @@ mod tests {
         use std::sync::Arc;
 
         let subjects = Arc::new(CapturingSubjectAnnouncer::default());
-        let failing_relations = Arc::new(
-            CapturingRelationAnnouncer::failing_with_invalid(),
-        );
+        let failing_relations = Arc::new(CapturingRelationAnnouncer::failing_with_invalid());
 
-        let emitter = SubjectEmitter::new(
-            subjects.clone(),
-            failing_relations.clone(),
-        );
+        let emitter = SubjectEmitter::new(subjects.clone(), failing_relations.clone());
 
         // Both subjects announce OK; relation assert fails; emit
         // returns cleanly.
         emitter
-            .emit_song(&song_with(
-                "a.flac",
-                None,
-                Some("A"),
-                Some("B"),
-            ))
+            .emit_song(&song_with("a.flac", None, Some("A"), Some("B")))
             .await;
 
         assert_eq!(subjects.count(), 2);
@@ -629,12 +571,7 @@ mod tests {
     #[tokio::test]
     async fn null_emitter_does_not_panic() {
         let e = SubjectEmitter::null();
-        e.emit_song(&song_with(
-            "a.flac",
-            Some("T"),
-            Some("A"),
-            Some("B"),
-        ))
-        .await;
+        e.emit_song(&song_with("a.flac", Some("T"), Some("A"), Some("B")))
+            .await;
     }
 }
