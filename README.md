@@ -68,7 +68,7 @@ One piece replaced. Every other piece - steward, catalogue, other plugins, brand
 
 ## Status
 
-Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The warden drives a real MPD instance end-to-end with operator configuration support; the remaining phase asserts `track` and `album` subjects before the first signed release.
+Early. Foundation is complete. Milestone 3’s MPD warden is shipped in-tree with subject assertion; Milestone 4 (album art respondent) is under way as a second workspace crate.
 
 **Landed**
 
@@ -87,11 +87,11 @@ Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The wa
     -   Phase 3.2b - playback supervisor module (two-task actor with bounded reconnection and TOML state reports). Landed.
     -   Phase 3.2c - supervisor wired into the warden trait impls; course-correction payload encoding and `PlaybackError` -> `PluginError` classification in place; lint suppressions retired. Landed.
     -   Phase 3.3 - operator configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`) parsed via `LoadContext::config`; endpoint and timeouts overridable; validated `ConfigError` hierarchy. Landed.
-    -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Pending.
+    -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Landed.
 
-**Next**
+**In progress (Milestone 4)**
 
--   Milestone 4 - `com.volumio.artwork.local` stocking `artwork.providers` (second plugin, first multi-piece composition).
+-   `com.volumio.artwork.local` on `artwork.providers` (singleton `Respondent` in `evo-plugin-sdk`); request type `artwork.resolve` (stub response until art resolution and payload schema land). Exercises the two-plugin workspace and multi-piece packaging next to the MPD warden.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 

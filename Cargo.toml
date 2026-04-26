@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "plugins/com.volumio.playback.mpd",
+    "plugins/com.volumio.artwork.local",
 ]
 
 # Workspace members are added as milestones land:
