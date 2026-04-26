@@ -1,5 +1,6 @@
 [plugin]
 name = "com.volumio.playback.mpd"
+# Keep in sync with this crate's Cargo.toml [package].version (PluginIdentity + packaging).
 version = "0.1.0"
 contract = 1
 

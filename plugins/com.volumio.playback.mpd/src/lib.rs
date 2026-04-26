@@ -168,6 +168,15 @@ pub fn manifest() -> Manifest {
         .expect("com-volumio-playback-mpd's embedded manifest must parse")
 }
 
+/// Semver of this plugin crate, from the workspace/Cargo `version`
+/// field. [`Plugin::describe`]'s [`PluginIdentity::version`],
+/// [`BuildInfo::plugin_build`], and `manifest.toml` `[plugin].version`
+/// must stay aligned (release tooling and tests assert this).
+fn plugin_crate_version() -> semver::Version {
+    semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .expect("CARGO_PKG_VERSION is valid semver")
+}
+
 /// Per-custody state retained for the lifetime of a custody.
 ///
 /// Holds the [`SupervisorHandle`] returned by
@@ -392,7 +401,7 @@ impl Plugin for MpdPlaybackPlugin {
             PluginDescription {
                 identity: PluginIdentity {
                     name: PLUGIN_NAME.to_string(),
-                    version: semver::Version::new(0, 1, 0),
+                    version: plugin_crate_version(),
                     contract: 1,
                 },
                 runtime_capabilities: RuntimeCapabilities {
@@ -718,12 +727,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn identity_name_matches_manifest() {
+    async fn identity_name_and_version_match_manifest() {
         let p = MpdPlaybackPlugin::new();
         let d = p.describe().await;
         let m = manifest();
         assert_eq!(d.identity.name, m.plugin.name);
         assert_eq!(d.identity.name, PLUGIN_NAME);
+        assert_eq!(d.identity.version, m.plugin.version, "CARGO_PKG_VERSION / describe() / manifest [plugin].version must match");
     }
 
     #[tokio::test]
@@ -731,6 +741,8 @@ mod tests {
         let p = MpdPlaybackPlugin::new();
         let d = p.describe().await;
         assert_eq!(d.identity.name, PLUGIN_NAME);
+        assert_eq!(d.identity.version, plugin_crate_version());
+        assert_eq!(d.build_info.plugin_build, d.identity.version.to_string());
         assert_eq!(d.identity.contract, 1);
         assert!(d.runtime_capabilities.accepts_custody);
         assert!(d.runtime_capabilities.request_types.is_empty());
