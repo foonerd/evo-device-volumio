@@ -23,6 +23,9 @@ class = "standard"
 evo_min_version = "0.1.9"
 os_family = "linux"
 outbound_network = false
+# Example (optional) in com.volumio.artwork.local.toml for relative MPD file paths:
+#   [library]
+#   roots = ["/data/music", "/media/usb/Music"]
 filesystem_scopes = []
 
 [resources]

@@ -1,17 +1,28 @@
 //! # com-volumio-artwork-local
 //!
-//! **Milestone 4** — first respondent on this distribution, stocking the
-//! `artwork.providers` shelf next to the MPD playback warden. This crate is
-//! the home for local album-art resolution (embedded tags, well-known cover
-//! filenames, and later refinements) over the `track` / `album` graph
-//! announced by `com.volumio.playback.mpd`.
+//! **Milestone 4** — `artwork.providers` singleton respondent. Resolves
+//! local sidecar cover art for tracks announced by
+//! `com.volumio.playback.mpd`, using the same `mpd-path` / `mpd-album`
+//! addressing scheme strings as [`ExternalAddressing`](
+//! evo_plugin_sdk::contract::ExternalAddressing) (see
+//! `resolve::SCHEME_MPD_PATH` / `resolve::SCHEME_MPD_ALBUM`).
 //!
-//! # Request surface
+//! # `artwork.resolve` (JSON, UTF-8)
 //!
-//! - **`artwork.resolve`**: resolve visual material for a subject. The
-//!   payload/response schema will align with the stewards and projections
-//!   as phases land; today the handler returns a **stub** JSON body so
-//!   routing and tests can be exercised.
+//! Request (v1 only):
+//! ```json
+//! {"v":1,"target":{"scheme":"mpd-path","value":"Artist/Album/01.flac"}}
+//! ```
+//! Response always includes `"v":1` and a `status` field: `ok`,
+//! `not_found`, `unsupported`, or `bad_request`, plus optional
+//! `path`, `mime`, and `detail` as document in [`resolve::ArtworkResolveResponse`].
+//!
+//! - **`mpd-path`**: `value` is MPD’s `file` (relative to a configured
+//!   [`config::PluginConfig::library_roots`] or absolute on disk). A cover
+//!   file next to the resolved audio file is chosen from a fixed name list
+//!   (`folder.jpg`, `cover.jpg`, …) in [`resolve::find_cover_beside_audio_file`].
+//! - **`mpd-album`**: returns `unsupported` until graph-backed or library
+//!   index resolution exists; callers should use `mpd-path` for now.
 //!
 //! # Version alignment
 //!
@@ -22,14 +33,14 @@
 //! # Reference
 //!
 //! [`evo_plugin_sdk::contract::Respondent`] and
-//! `docs/engineering/PLUGIN_AUTHORING.md` (singleton respondent). The
-//! warden reference in-tree is `evo-core/crates/evo-example-warden/`.
+//! `docs/engineering/PLUGIN_AUTHORING.md` (singleton respondent).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-// `Plugin` / `Respondent` use return-position `impl Future + Send` on
-// trait methods; same as com-volumio-playback-mdp.
 #![allow(clippy::manual_async_fn)]
+
+mod config;
+mod resolve;
 
 use std::future::Future;
 
@@ -39,6 +50,8 @@ use evo_plugin_sdk::contract::{
 };
 use evo_plugin_sdk::Manifest;
 
+use crate::config::PluginConfig;
+
 /// Embedded manifest.
 pub const MANIFEST_TOML: &str = include_str!("../manifest.toml");
 
@@ -47,10 +60,6 @@ pub const PLUGIN_NAME: &str = "com.volumio.artwork.local";
 
 /// Request type: resolve cover / visual material for a subject.
 const REQUEST_ARTWORK_RESOLVE: &str = "artwork.resolve";
-
-/// Stub body until real resolution is implemented. UTF-8 JSON.
-const STUB_RESOLVE_JSON: &str =
-    r#"{"v":1,"status":"stub","detail":"Milestone 4: artwork.resolve not yet implemented"}"#;
 
 /// Parse the embedded [`Manifest`].
 pub fn manifest() -> Manifest {
@@ -62,12 +71,13 @@ fn plugin_crate_version() -> semver::Version {
     semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver")
 }
 
-/// Local artwork respondent. Skeleton: admission, describe, and stub
-/// `handle_request`; art logic and subject graph walks follow in later
-/// work items.
+/// Local artwork respondent: optional `[library]` roots in
+/// `LoadContext::config`, and sidecar file discovery for `artwork.resolve`.
 pub struct ArtworkLocalPlugin {
     /// `true` after a successful [`Plugin::load`].
     loaded: bool,
+    /// Merged from [`PluginConfig::from_toml_table`].
+    config: PluginConfig,
     /// Count of `handle_request` invocations.
     requests_handled: u64,
 }
@@ -77,6 +87,7 @@ impl ArtworkLocalPlugin {
     pub fn new() -> Self {
         Self {
             loaded: false,
+            config: PluginConfig::defaults(),
             requests_handled: 0,
         }
     }
@@ -86,11 +97,11 @@ impl ArtworkLocalPlugin {
         self.requests_handled
     }
 
-    /// For unit tests: simulate a successful [`Plugin::load`] without
-    /// building a full [`LoadContext`].
+    /// For unit tests: simulate load without a real [`LoadContext`].
     #[cfg(test)]
-    fn set_loaded_for_test(&mut self) {
+    fn set_loaded_with_config(&mut self, config: PluginConfig) {
         self.loaded = true;
+        self.config = config;
     }
 }
 
@@ -134,6 +145,15 @@ impl Plugin for ArtworkLocalPlugin {
                 config_keys = ctx.config.len(),
                 "artwork local plugin load"
             );
+            self.config = PluginConfig::from_toml_table(&ctx.config)
+                .map_err(|e| PluginError::Permanent(format!("invalid plugin config: {e}")))?;
+            if !self.config.library_roots.is_empty() {
+                tracing::info!(
+                    plugin = PLUGIN_NAME,
+                    n = self.config.library_roots.len(),
+                    "library search roots configured"
+                );
+            }
             self.loaded = true;
             Ok(())
         }
@@ -142,6 +162,7 @@ impl Plugin for ArtworkLocalPlugin {
     fn unload(&mut self) -> impl Future<Output = Result<(), PluginError>> + Send + '_ {
         async move {
             self.loaded = false;
+            self.config = PluginConfig::defaults();
             Ok(())
         }
     }
@@ -175,27 +196,35 @@ impl Respondent for ArtworkLocalPlugin {
                 ));
             }
 
-            self.requests_handled += 1;
-
-            if req.request_type == REQUEST_ARTWORK_RESOLVE {
-                tracing::info!(
-                    plugin = PLUGIN_NAME,
-                    request_type = %req.request_type,
-                    cid = req.correlation_id,
-                    payload_len = req.payload.len(),
-                    "artwork.resolve (stubbed)"
-                );
-                return Ok(Response::for_request(
-                    req,
-                    STUB_RESOLVE_JSON.as_bytes().to_vec(),
-                ));
+            if req.request_type != REQUEST_ARTWORK_RESOLVE {
+                self.requests_handled += 1;
+                return Err(PluginError::Permanent(format!(
+                    "unknown request type: {:?} (not one of: {:?})",
+                    req.request_type,
+                    [REQUEST_ARTWORK_RESOLVE]
+                )));
             }
 
-            Err(PluginError::Permanent(format!(
-                "unknown request type: {:?} (not one of: {:?})",
-                req.request_type,
-                [REQUEST_ARTWORK_RESOLVE]
-            )))
+            self.requests_handled += 1;
+
+            tracing::debug!(
+                plugin = PLUGIN_NAME,
+                request_type = %req.request_type,
+                cid = req.correlation_id,
+                payload_len = req.payload.len(),
+                "artwork.resolve"
+            );
+
+            let out = match resolve::resolve_artwork(&self.config.library_roots, &req.payload) {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(PluginError::Permanent(e));
+                }
+            };
+            let body = out
+                .json_bytes()
+                .map_err(|e| PluginError::Permanent(format!("artwork response JSON: {e}")))?;
+            Ok(Response::for_request(req, body))
         }
     }
 }
@@ -203,8 +232,20 @@ impl Respondent for ArtworkLocalPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
     use evo_plugin_sdk::contract::HealthStatus;
     use evo_plugin_sdk::manifest::InteractionShape;
+    use serde_json::Value;
+
+    fn sample_mpd_path_payload(value: &str) -> Vec<u8> {
+        format!(
+            r#"{{"v":1,"target":{{"scheme":"{}","value":{}}}}}"#,
+            resolve::SCHEME_MPD_PATH,
+            serde_json::to_string(value).unwrap()
+        )
+        .into_bytes()
+    }
 
     #[test]
     fn manifest_parses() {
@@ -266,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn handle_unknown_request_type() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_for_test();
+        p.set_loaded_with_config(PluginConfig::defaults());
         let r = Request {
             request_type: "metadata.query".to_string(),
             payload: vec![],
@@ -279,36 +320,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handle_resolve_stub() {
+    async fn handle_resolve_bad_request_invalid_json() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_for_test();
+        p.set_loaded_with_config(PluginConfig::defaults());
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
-            payload: b"{}".to_vec(),
-            correlation_id: 99,
+            payload: b"{not json".to_vec(),
+            correlation_id: 3,
             deadline: None,
         };
         let out = p.handle_request(&r).await.unwrap();
-        assert_eq!(out.correlation_id, 99);
-        let text = String::from_utf8(out.payload).unwrap();
-        assert!(text.contains("stub"), "{text}");
+        let v: Value = serde_json::from_slice(&out.payload).unwrap();
+        assert_eq!(v["status"], "bad_request");
         assert_eq!(p.requests_handled(), 1);
+    }
+
+    #[tokio::test]
+    async fn handle_resolve_not_found() {
+        let mut p = ArtworkLocalPlugin::new();
+        p.set_loaded_with_config(PluginConfig::defaults());
+        let r = Request {
+            request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
+            payload: sample_mpd_path_payload("/no/such/absolute.flac"),
+            correlation_id: 4,
+            deadline: None,
+        };
+        let out = p.handle_request(&r).await.unwrap();
+        let v: Value = serde_json::from_slice(&out.payload).unwrap();
+        assert_eq!(v["status"], "not_found");
+        assert_eq!(p.requests_handled(), 1);
+    }
+
+    #[tokio::test]
+    async fn handle_resolve_ok_with_cover() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("A").join("B");
+        std::fs::create_dir_all(&sub).unwrap();
+        let flac = sub.join("t.flac");
+        std::fs::write(&flac, b"x").unwrap();
+        std::fs::write(sub.join("folder.jpg"), b"fakejpeg").unwrap();
+
+        let rel = "A/B/t.flac";
+        let mut p = ArtworkLocalPlugin::new();
+        p.set_loaded_with_config(PluginConfig {
+            library_roots: vec![dir.path().to_path_buf()],
+        });
+
+        let r = Request {
+            request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
+            payload: sample_mpd_path_payload(rel),
+            correlation_id: 5,
+            deadline: None,
+        };
+        let out = p.handle_request(&r).await.unwrap();
+        let v: Value = serde_json::from_slice(&out.payload).unwrap();
+        assert_eq!(v["status"], "ok");
+        let pstr = v["path"].as_str().unwrap();
+        let pb = PathBuf::from(pstr);
+        assert!(pb.ends_with("folder.jpg"), "{pstr}");
     }
 
     #[tokio::test]
     async fn handle_past_deadline() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_for_test();
+        p.set_loaded_with_config(PluginConfig::defaults());
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
             payload: vec![],
-            correlation_id: 3,
+            correlation_id: 6,
             deadline: Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
         };
         let e = p.handle_request(&r).await.unwrap_err();
         assert!(matches!(e, PluginError::Transient(_)));
-        // Deadline short-circuits before increment; keep handler accounting
-        // for successful dispatch attempts only.
         assert_eq!(p.requests_handled(), 0);
     }
 }

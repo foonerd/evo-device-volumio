@@ -91,7 +91,7 @@ Early. Foundation is complete. Milestone 3’s MPD warden is shipped in-tree wit
 
 **In progress (Milestone 4)**
 
--   `com.volumio.artwork.local` on `artwork.providers` (singleton `Respondent` in `evo-plugin-sdk`); request type `artwork.resolve` (stub response until art resolution and payload schema land). Exercises the two-plugin workspace and multi-piece packaging next to the MPD warden.
+-   `com.volumio.artwork.local` on `artwork.providers` (singleton `Respondent` in `evo-plugin-sdk`); request type `artwork.resolve` with **v1 JSON** and optional `/etc/evo/plugins.d/…` `[library] roots` for MPD relative paths. Sidecar cover files (`folder.jpg`, `cover.jpg`, …) beside the track; `mpd-album` addressing returns `unsupported` until graph-based resolution. Exercises the two-plugin workspace and multi-piece packaging next to the MPD warden.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 
