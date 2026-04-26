@@ -1,4 +1,4 @@
-//! `artwork.resolve` JSON payload and local sidecar file discovery.
+//! `artwork.resolve` JSON payload, sidecar file discovery, and embedded tags.
 //!
 //! Request `target` uses the same `scheme` / `value` shape as
 //! [`evo_plugin_sdk::contract::ExternalAddressing`], with schemes aligned to
@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde::Serialize;
+
+use crate::embedded;
 
 /// `mpd-path` scheme: value is MPD's `file` (library-relative or absolute).
 pub(crate) const SCHEME_MPD_PATH: &str = "mpd-path";
@@ -125,10 +127,11 @@ fn resolve_audio_path(library_roots: &[PathBuf], value: &str) -> Option<PathBuf>
     None
 }
 
-/// Build the JSON response body for a resolve request, or a protocol error
-/// only when a valid `Ok` result cannot be serialised to JSON.
+/// Build the JSON response body. Returns [`Err`] only for internal failures
+/// (non-UTF-8 path, cache I/O) that should map to [`PluginError::Permanent`].
 pub(crate) fn resolve_artwork(
     library_roots: &[PathBuf],
+    state_dir: Option<&Path>,
     payload: &[u8],
 ) -> Result<ArtworkResolveResponse, String> {
     if payload.is_empty() {
@@ -187,49 +190,11 @@ pub(crate) fn resolve_artwork(
                     .to_string(),
             ),
         }),
-        SCHEME_MPD_PATH => {
-            if req.target.value.is_empty() {
-                return Ok(ArtworkResolveResponse {
-                    v: 1,
-                    status: ResponseStatus::BadRequest,
-                    path: None,
-                    mime: None,
-                    detail: Some("empty mpd-path value".to_string()),
-                });
-            }
-            let Some(track_path) = resolve_audio_path(library_roots, &req.target.value) else {
-                return Ok(ArtworkResolveResponse {
-                    v: 1,
-                    status: ResponseStatus::NotFound,
-                    path: None,
-                    mime: None,
-                    detail: Some("audio file not found for mpd_path".to_string()),
-                });
-            };
-            let Some(cover) = find_cover_beside_audio_file(&track_path) else {
-                return Ok(ArtworkResolveResponse {
-                    v: 1,
-                    status: ResponseStatus::NotFound,
-                    path: None,
-                    mime: None,
-                    detail: Some("no sidecar cover in track directory".to_string()),
-                });
-            };
-            let mime = mime_for_path(&cover).map(str::to_string);
-            let path = match cover.to_str() {
-                Some(s) => s.to_string(),
-                None => {
-                    return Err("cover path is not valid UTF-8; cannot represent in JSON".to_string());
-                }
-            };
-            Ok(ArtworkResolveResponse {
-                v: 1,
-                status: ResponseStatus::Ok,
-                path: Some(path),
-                mime,
-                detail: None,
-            })
-        }
+        SCHEME_MPD_PATH => resolve_mpd_path(
+            library_roots,
+            state_dir,
+            &req.target.value,
+        ),
         other => Ok(ArtworkResolveResponse {
             v: 1,
             status: ResponseStatus::BadRequest,
@@ -238,6 +203,76 @@ pub(crate) fn resolve_artwork(
             detail: Some(format!("unknown target.scheme: {other}")),
         }),
     }
+}
+
+fn ok_from_path(cover: PathBuf) -> Result<ArtworkResolveResponse, String> {
+    let mime = mime_for_path(&cover).map(str::to_string);
+    let path = cover
+        .to_str()
+        .ok_or("cover path is not valid UTF-8; cannot represent in JSON")?
+        .to_string();
+    Ok(ArtworkResolveResponse {
+        v: 1,
+        status: ResponseStatus::Ok,
+        path: Some(path),
+        mime,
+        detail: None,
+    })
+}
+
+fn resolve_mpd_path(
+    library_roots: &[PathBuf],
+    state_dir: Option<&Path>,
+    value: &str,
+) -> Result<ArtworkResolveResponse, String> {
+    if value.is_empty() {
+        return Ok(ArtworkResolveResponse {
+            v: 1,
+            status: ResponseStatus::BadRequest,
+            path: None,
+            mime: None,
+            detail: Some("empty mpd-path value".to_string()),
+        });
+    }
+
+    let Some(track_path) = resolve_audio_path(library_roots, value) else {
+        return Ok(ArtworkResolveResponse {
+            v: 1,
+            status: ResponseStatus::NotFound,
+            path: None,
+            mime: None,
+            detail: Some("audio file not found for mpd_path".to_string()),
+        });
+    };
+
+    if let Some(cover) = find_cover_beside_audio_file(&track_path) {
+        return ok_from_path(cover);
+    }
+
+    if let Some(img) = embedded::read_embedded_cover(&track_path) {
+        let Some(dir) = state_dir else {
+            return Ok(ArtworkResolveResponse {
+                v: 1,
+                status: ResponseStatus::NotFound,
+                path: None,
+                mime: None,
+                detail: Some(
+                    "embedded cover in tags but no state_dir to write cache; cannot expose path"
+                        .to_string(),
+                ),
+            });
+        };
+        let cached = embedded::write_embedded_to_cache(dir, &track_path, &img)?;
+        return ok_from_path(cached);
+    }
+
+    Ok(ArtworkResolveResponse {
+        v: 1,
+        status: ResponseStatus::NotFound,
+        path: None,
+        mime: None,
+        detail: Some("no sidecar or embedded cover for this track".to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -249,8 +284,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let flac = dir.path().join("1.flac");
         std::fs::write(&flac, b"x").unwrap();
-        let cover = dir.path().join("folder.jpg");
-        std::fs::write(&cover, b"jpeg").unwrap();
+        let _ = std::fs::write(dir.path().join("folder.jpg"), b"jpeg");
         let f2 = dir.path().join("cover.jpg");
         std::fs::write(&f2, b"j2").unwrap();
         // COVER_FILE_NAMES has cover.jpg before folder.jpg
@@ -271,7 +305,7 @@ mod tests {
             r#"{{"v":1,"target":{{"scheme":"{}","value":"Artist/Alb/1.flac"}}}}"#,
             SCHEME_MPD_PATH
         );
-        let r = resolve_artwork(&[dir.path().to_path_buf()], body.as_bytes()).unwrap();
+        let r = resolve_artwork(&[dir.path().to_path_buf()], None, body.as_bytes()).unwrap();
         assert_eq!(r.status, ResponseStatus::Ok);
         assert!(r.path.as_ref().unwrap().ends_with("folder.jpg"));
         assert_eq!(r.mime.as_deref(), Some("image/jpeg"));
@@ -281,6 +315,7 @@ mod tests {
     fn http_mpd_path_not_found() {
         let r = resolve_artwork(
             &[],
+            None,
             r#"{"v":1,"target":{"scheme":"mpd-path","value":"http://x/a.flac"}}"#.as_bytes(),
         )
         .unwrap();

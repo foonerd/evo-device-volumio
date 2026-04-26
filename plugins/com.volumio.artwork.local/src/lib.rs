@@ -40,6 +40,7 @@
 #![allow(clippy::manual_async_fn)]
 
 mod config;
+mod embedded;
 mod resolve;
 
 use std::future::Future;
@@ -72,12 +73,15 @@ fn plugin_crate_version() -> semver::Version {
 }
 
 /// Local artwork respondent: optional `[library]` roots in
-/// `LoadContext::config`, and sidecar file discovery for `artwork.resolve`.
+/// `LoadContext::config`, sidecar files, embedded tag images, and
+/// `state_dir` cache for the latter.
 pub struct ArtworkLocalPlugin {
     /// `true` after a successful [`Plugin::load`].
     loaded: bool,
     /// Merged from [`PluginConfig::from_toml_table`].
     config: PluginConfig,
+    /// `LoadContext::state_dir`; used for embedded cover cache.
+    state_dir: Option<std::path::PathBuf>,
     /// Count of `handle_request` invocations.
     requests_handled: u64,
 }
@@ -88,6 +92,7 @@ impl ArtworkLocalPlugin {
         Self {
             loaded: false,
             config: PluginConfig::defaults(),
+            state_dir: None,
             requests_handled: 0,
         }
     }
@@ -99,9 +104,10 @@ impl ArtworkLocalPlugin {
 
     /// For unit tests: simulate load without a real [`LoadContext`].
     #[cfg(test)]
-    fn set_loaded_with_config(&mut self, config: PluginConfig) {
+    fn set_loaded_with_config(&mut self, config: PluginConfig, state_dir: std::path::PathBuf) {
         self.loaded = true;
         self.config = config;
+        self.state_dir = Some(state_dir);
     }
 }
 
@@ -154,6 +160,7 @@ impl Plugin for ArtworkLocalPlugin {
                     "library search roots configured"
                 );
             }
+            self.state_dir = Some(ctx.state_dir.clone());
             self.loaded = true;
             Ok(())
         }
@@ -163,6 +170,7 @@ impl Plugin for ArtworkLocalPlugin {
         async move {
             self.loaded = false;
             self.config = PluginConfig::defaults();
+            self.state_dir = None;
             Ok(())
         }
     }
@@ -215,7 +223,11 @@ impl Respondent for ArtworkLocalPlugin {
                 "artwork.resolve"
             );
 
-            let out = match resolve::resolve_artwork(&self.config.library_roots, &req.payload) {
+            let out = match resolve::resolve_artwork(
+                &self.config.library_roots,
+                self.state_dir.as_deref(),
+                &req.payload,
+            ) {
                 Ok(r) => r,
                 Err(e) => {
                     return Err(PluginError::Permanent(e));
@@ -307,7 +319,8 @@ mod tests {
     #[tokio::test]
     async fn handle_unknown_request_type() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_with_config(PluginConfig::defaults());
+        let tmp = tempfile::tempdir().unwrap();
+        p.set_loaded_with_config(PluginConfig::defaults(), tmp.path().to_path_buf());
         let r = Request {
             request_type: "metadata.query".to_string(),
             payload: vec![],
@@ -322,7 +335,8 @@ mod tests {
     #[tokio::test]
     async fn handle_resolve_bad_request_invalid_json() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_with_config(PluginConfig::defaults());
+        let tmp = tempfile::tempdir().unwrap();
+        p.set_loaded_with_config(PluginConfig::defaults(), tmp.path().to_path_buf());
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
             payload: b"{not json".to_vec(),
@@ -338,7 +352,8 @@ mod tests {
     #[tokio::test]
     async fn handle_resolve_not_found() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_with_config(PluginConfig::defaults());
+        let tmp = tempfile::tempdir().unwrap();
+        p.set_loaded_with_config(PluginConfig::defaults(), tmp.path().to_path_buf());
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
             payload: sample_mpd_path_payload("/no/such/absolute.flac"),
@@ -362,9 +377,12 @@ mod tests {
 
         let rel = "A/B/t.flac";
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_with_config(PluginConfig {
-            library_roots: vec![dir.path().to_path_buf()],
-        });
+        p.set_loaded_with_config(
+            PluginConfig {
+                library_roots: vec![dir.path().to_path_buf()],
+            },
+            dir.path().join("state"),
+        );
 
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
@@ -383,7 +401,8 @@ mod tests {
     #[tokio::test]
     async fn handle_past_deadline() {
         let mut p = ArtworkLocalPlugin::new();
-        p.set_loaded_with_config(PluginConfig::defaults());
+        let tmp = tempfile::tempdir().unwrap();
+        p.set_loaded_with_config(PluginConfig::defaults(), tmp.path().to_path_buf());
         let r = Request {
             request_type: REQUEST_ARTWORK_RESOLVE.to_string(),
             payload: vec![],
