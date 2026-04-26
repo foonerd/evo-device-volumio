@@ -305,6 +305,8 @@ Canonical tiny change: an ALSA device string was wrong (`wh:0,0`), fix to `hw:0,
 sudo $EDITOR /etc/evo/plugins.d/com.volumio.playback.mpd.toml
 ```
 
+The same `plugins.d` directory holds other stock pieces, for example `com.volumio.metadata.local.toml` (library roots and `metadata` response profile for `metadata.query` — see [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md)) and `com.volumio.artwork.local.toml` (library roots for cover art). Edit the file that matches the parameter you are changing; the reload rules below apply per plugin.
+
 ### 8.2 Ask the plugin to reload
 
 Depends on the plugin's declared `hot_reload` policy in its manifest (`evo-core/docs/engineering/PLUGIN_PACKAGING.md` section 2):

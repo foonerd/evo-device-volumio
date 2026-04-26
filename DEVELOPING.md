@@ -36,6 +36,15 @@ cargo test --workspace
 
 Both must be green before any version bump. The workspace is empty at Milestone 1; build and test will succeed trivially until plugin crates land in Milestone 3.
 
+## Plugin operator TOML (in-tree reference)
+
+Plugins receive `LoadContext::config` from per-plugin TOML (convention: `/etc/evo/plugins.d/<plugin name>.toml` on a device). For the stock local respondents in this repo:
+
+-   **`com.volumio.metadata.local`** — optional `[library]` with `roots` / `root` (absolute paths) so `mpd-path` and `mpd-album` resolve under your music tree; optional `[metadata] profile` = `standard` (default) or `extended` to control `metadata.query` payload size. **Full wire schema and profile field matrix:** [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md).
+-   **`com.volumio.artwork.local`** — same `[library]` idea for `artwork.resolve`; see that crate’s `manifest.toml` and `src/config.rs`.
+
+Re-read after edit depends on the plugin manifest `lifecycle.hot_reload` and the steward; a service restart is always a safe fallback.
+
 ## Running the steward against this repo's catalogue
 
 Once Milestone 2 lands and `catalogue/volumio.toml` exists:
