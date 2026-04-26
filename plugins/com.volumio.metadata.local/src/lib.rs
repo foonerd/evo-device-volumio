@@ -18,8 +18,9 @@
 //! optional nested `credits` (composer, conductor, performers, label, …),
 //! `classical` (work, movement, movement index), `sort` (TXXX sort keys),
 //! `original`, `dates` (recording / release strings), `identifiers` (ISRC,
-//! MusicBrainz UUIDs, catalog), `replay_gain`, and `file` (sample rate,
-//! bit depth, bitrates, channel mask) from the audio container.
+//! MusicBrainz UUIDs, catalog), `replay_gain`, `file` (sample rate, bit
+//! depth, bitrates, channel mask), and `extras` (unmapped / vendor `ItemKey::Unknown`
+//! frames). **Field catalogue:** `docs/METADATA_QUERY_V1.md` in this plugin tree.
 //!
 //! # Version alignment
 //!

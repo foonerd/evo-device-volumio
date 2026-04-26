@@ -1,13 +1,17 @@
 //! `metadata.query` v1: resolve tag metadata for a track file (MPD `mpd-path`).
 //! Response includes grouped fields for classical, credits, MusicBrainz, dates, and file properties.
+//!
+//! Full wire field catalogue: `docs/METADATA_QUERY_V1.md` (in this plugin directory).
 
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::properties::FileProperties;
 use lofty::read_from_path;
-use lofty::tag::{Accessor, ItemKey, Tag};
+use lofty::tag::{Accessor, ItemKey, ItemValue, Tag};
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -114,6 +118,11 @@ pub(crate) struct MetadataQueryResponse {
     compilation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     podcast: Option<bool>,
+
+    /// Id3 TXXX-style and other [`ItemKey::Unknown`] frames: key = wire name, value = text; duplicate
+    /// keys become `NAME@1`, `NAME@2`, … Binary values appear as `<binary: N bytes>`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extras: Option<BTreeMap<String, String>>,
 }
 
 /// Picard-style sort keys for media library ordering.
@@ -319,6 +328,7 @@ impl MetadataQueryResponse {
             file: None,
             compilation: None,
             podcast: None,
+            extras: None,
         }
     }
 }
@@ -565,6 +575,61 @@ fn file_block_from_props(p: &FileProperties, duration: Duration) -> FileMetadata
 }
 
 /// Build a full OK response from tag + `FileProperties`.
+/// Unmapped / vendor tag items ([`ItemKey::Unknown`]) for a complete lossless view of custom frames.
+fn collect_extras(tag: &Tag) -> Option<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    let mut per_name: HashMap<String, u32> = HashMap::new();
+
+    for item in tag.items() {
+        let ItemKey::Unknown(name) = item.key() else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+
+        let val = match item.value() {
+            ItemValue::Text(s) | ItemValue::Locator(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    continue;
+                }
+                let t = t.to_string();
+                if t.len() <= MAX_TEXT_FIELD_BYTES {
+                    t
+                } else {
+                    t.char_indices()
+                        .take_while(|(i, _)| *i < MAX_TEXT_FIELD_BYTES)
+                        .map(|(_, c)| c)
+                        .collect()
+                }
+            }
+            ItemValue::Binary(b) => {
+                if b.is_empty() {
+                    continue;
+                }
+                format!("<binary: {} bytes>", b.len())
+            }
+        };
+
+        let c = per_name.entry(name.clone()).or_default();
+        let idx = *c;
+        *c += 1;
+        let key = if idx == 0 {
+            name.clone()
+        } else {
+            format!("{name}@{idx}")
+        };
+        out.insert(key, val);
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 fn ok_response(
     tag: &Tag,
     file_props: &FileProperties,
@@ -608,6 +673,7 @@ fn ok_response(
         file: Some(file_block_from_props(file_props, duration)),
         compilation: parse_compilation_bool(tag),
         podcast: parse_podcast_bool(tag),
+        extras: collect_extras(tag),
     }
 }
 
@@ -822,5 +888,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.status, ResponseStatus::NotFound);
+    }
+
+    #[test]
+    fn extras_surfaces_unknown_frames() {
+        use lofty::tag::TagItem;
+
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_unchecked(TagItem::new(
+            ItemKey::Unknown("TXXX:my_vendor".to_string()),
+            ItemValue::Text("opaque value".to_string()),
+        ));
+        let r = response_from_tag(&tag, 0, None);
+        let e = r.extras.as_ref().expect("extras");
+        assert_eq!(
+            e.get("TXXX:my_vendor").map(String::as_str),
+            Some("opaque value")
+        );
     }
 }
