@@ -54,9 +54,11 @@ check-env:
 	@echo "check-env: OK"
 
 .PHONY: build-plugins
+# EVO_CORE must be set so Cross.toml can mount the sibling evo-core tree (path dep).
 build-plugins: check-env
 	@echo "[build-plugins] cross-compiling plugin workspace for $(TARGET_ARCH)"
-	cd $(REPO_ROOT) && cross build --release --target $(TARGET_ARCH) --workspace
+	@echo "[build-plugins] EVO_CORE=$(EVO_CORE_PATH) (sibling; required for path dep on evo-plugin-sdk)"
+	cd $(REPO_ROOT) && EVO_CORE="$(EVO_CORE_PATH)" cross build --release --target $(TARGET_ARCH) --workspace
 
 .PHONY: build-steward
 build-steward: check-env

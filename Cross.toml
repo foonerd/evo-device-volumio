@@ -1,0 +1,13 @@
+# cross (https://github.com/cross-rs/cross) — see scripts/workstation/Makefile
+#
+# The workspace depends on a sibling foonerd/evo-core checkout via
+#   evo-plugin-sdk = { path = "../evo-core/crates/evo-plugin-sdk" }
+# That tree must be visible in the build container at the same absolute path
+# as on the host. The Makefile sets EVO_CORE to the resolved EVO_CORE_PATH
+# and exports it for `cross build`.
+
+[build.env]
+volumes = ["EVO_CORE"]
+
+[target.aarch64-unknown-linux-gnu.env]
+volumes = ["EVO_CORE"]
