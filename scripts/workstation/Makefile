@@ -21,7 +21,7 @@
 # Paths are relative to this Makefile's directory.
 REPO_ROOT     := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 EVO_CORE_PATH ?= $(abspath $(REPO_ROOT)/../evo-core)
-EVO_CORE_TAG  ?= v0.1.8
+EVO_CORE_TAG  ?= v0.1.9
 TARGET_ARCH   ?= aarch64-unknown-linux-gnu
 
 .PHONY: help

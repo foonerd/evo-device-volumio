@@ -19,7 +19,7 @@ exec = "<compiled-in>"
 class = "standard"
 
 [prerequisites]
-evo_min_version = "0.1.8"
+evo_min_version = "0.1.9"
 os_family = "linux"
 outbound_network = false
 filesystem_scopes = []

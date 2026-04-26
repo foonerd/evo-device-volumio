@@ -25,9 +25,10 @@
 //!   `/etc/evo/plugins.d/com.volumio.playback.mpd.toml`; endpoint
 //!   and timeouts overridable per the [`config`] module's schema.
 //!   Landed.
-//! - Phase 3.4: subject assertion (`track` and `album` with
-//!   `album_of` edges for Milestone 4's album-art respondent to
-//!   walk). Pending.
+//! - Phase 3.4: subject assertion - `track` and `album` subjects
+//!   announced and `album_of` relation asserted whenever MPD
+//!   reports a current song. Milestone 4's album-art respondent
+//!   walks the resulting graph. Landed.
 //!
 //! The wire-transport binary lands after the in-process flow has
 //! stabilised.
@@ -53,6 +54,27 @@
 //! All fields optional. Missing sections or fields use the
 //! defaults set by [`MpdPlaybackPlugin::new`]. An empty or absent
 //! config file is a valid (default-only) configuration.
+//!
+//! ## Subject assertion
+//!
+//! On every song change, the warden announces two subjects and
+//! one relation to the steward:
+//!
+//! - `track` subject, keyed by scheme `mpd-path`, value = MPD's
+//!   `file` field (relative library path or stream URL).
+//! - `album` subject, keyed by scheme `mpd-album`, value =
+//!   `"{artist}|{album}"` where `artist` is the `Artist` tag if
+//!   present and non-empty, else `"unknown"`. The pipe separator
+//!   disambiguates same-titled albums from different artists.
+//! - `album_of` relation from the track subject to the album
+//!   subject.
+//!
+//! Emission is additive and best-effort: subjects and relations
+//! accumulate in the steward's registry as they are played;
+//! announcer errors are logged but do not disrupt playback. A
+//! song whose `Album` tag is missing or empty produces only a
+//! track subject (no album, no relation). See the
+//! [`playback_supervisor::subject_emitter`] module for details.
 //!
 //! ## Course-correction payload encoding
 //!
@@ -83,6 +105,20 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// The SDK's plugin contract deliberately uses return-position
+// `impl Future<Output = _> + Send + '_` rather than `async fn` for
+// every trait method (see the module docs on
+// `evo_plugin_sdk::contract`). The explicit `Send` bound is
+// required for the multi-threaded tokio runtime the steward
+// dispatches on; `async fn` in trait position would not produce
+// it without unstable `return_type_notation`. Clippy's
+// `manual_async_fn` lint would push us toward a form that either
+// breaks Send auto-trait inference or diverges from the
+// upstream reference warden (`evo-core/crates/evo-example-warden`),
+// so the lint is allowed crate-wide. This is a trait-contract
+// constraint, not a style preference; it applies uniformly to
+// every `impl Plugin` / `impl Warden` method.
+#![allow(clippy::manual_async_fn)]
 
 mod config;
 mod mpd;
@@ -90,18 +126,21 @@ mod playback_supervisor;
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use evo_plugin_sdk::contract::{
     Assignment, BuildInfo, CourseCorrection, CustodyHandle, HealthReport,
-    LoadContext, Plugin, PluginDescription, PluginError,
-    PluginIdentity, RuntimeCapabilities, Warden,
+    LoadContext, Plugin, PluginDescription, PluginError, PluginIdentity,
+    RelationAnnouncer, RuntimeCapabilities, SubjectAnnouncer, Warden,
 };
 use evo_plugin_sdk::Manifest;
 
 use crate::config::PluginConfig;
 use crate::mpd::{ConnectTimeouts, MpdEndpoint};
-use crate::playback_supervisor::{PlaybackCommand, PlaybackError, SupervisorHandle};
+use crate::playback_supervisor::{
+    PlaybackCommand, PlaybackError, SubjectEmitter, SupervisorHandle,
+};
 
 /// The plugin's embedded manifest, as a static string.
 ///
@@ -144,16 +183,26 @@ struct TrackedCustody {
 /// MPD playback warden plugin.
 ///
 /// Construct via [`MpdPlaybackPlugin::new`] (default endpoint
-/// `127.0.0.1:6600`, default timeouts). [`Plugin::load`] replaces
-/// the defaults with values from [`LoadContext::config`] if the
-/// operator has supplied a config file. Tests may also use
+/// `127.0.0.1:6600`, default timeouts, no subject emitter).
+/// [`Plugin::load`] replaces the defaults with values from
+/// [`LoadContext::config`] if the operator has supplied a config
+/// file, and populates the [`SubjectEmitter`] from the load
+/// context's announcer handles. Tests may also use
 /// [`MpdPlaybackPlugin::with_endpoint`] to construct a plugin
 /// pointing at a specific endpoint without going through the
-/// `load` path.
+/// `load` path; such tests set [`Self::subject_emitter`]
+/// directly (typically to [`SubjectEmitter::null`]) before
+/// exercising custody verbs.
 pub struct MpdPlaybackPlugin {
     loaded: bool,
     endpoint: MpdEndpoint,
     timeouts: ConnectTimeouts,
+    /// Bundle of subject and relation announcer handles used by
+    /// [`Warden::take_custody`] to equip each spawned supervisor.
+    /// `None` until [`Plugin::load`] populates from
+    /// [`LoadContext`]; `take_custody` refuses to proceed when
+    /// absent.
+    subject_emitter: Option<SubjectEmitter>,
     custodies: HashMap<String, TrackedCustody>,
     /// Cumulative count of custodies accepted since construction.
     /// Does not decrement on release.
@@ -185,6 +234,7 @@ impl MpdPlaybackPlugin {
             loaded: false,
             endpoint,
             timeouts,
+            subject_emitter: None,
             custodies: HashMap::new(),
             custodies_taken: 0,
             corrections_dispatched: 0,
@@ -372,6 +422,16 @@ impl Plugin for MpdPlaybackPlugin {
             );
 
             self.apply_config_table(&ctx.config)?;
+
+            // Equip the subject emitter from the announcer
+            // handles the steward supplied. The Arcs are cloned
+            // cheaply; the emitter clones them again per custody
+            // (one clone per spawn() call).
+            self.subject_emitter = Some(SubjectEmitter::new(
+                Arc::clone(&ctx.subject_announcer) as Arc<dyn SubjectAnnouncer>,
+                Arc::clone(&ctx.relation_announcer) as Arc<dyn RelationAnnouncer>,
+            ));
+
             self.loaded = true;
 
             tracing::info!(
@@ -380,7 +440,7 @@ impl Plugin for MpdPlaybackPlugin {
                 connect_ms = self.timeouts.connect.as_millis() as u64,
                 welcome_ms = self.timeouts.welcome.as_millis() as u64,
                 command_ms = self.timeouts.command.as_millis() as u64,
-                "plugin loaded; config applied"
+                "plugin loaded; config applied; subject emitter equipped"
             );
 
             Ok(())
@@ -441,6 +501,21 @@ impl Warden for MpdPlaybackPlugin {
                 ));
             }
 
+            // Defense in depth: load() populates the emitter
+            // alongside setting `loaded = true`, so the two gates
+            // are coupled in practice. An explicit check here
+            // makes the invariant local and survives any future
+            // restructuring of load().
+            let emitter = match self.subject_emitter.as_ref() {
+                Some(e) => e.clone(),
+                None => {
+                    return Err(PluginError::Permanent(
+                        "subject emitter not initialised; load() was not called"
+                            .to_string(),
+                    ));
+                }
+            };
+
             let handle = CustodyHandle::new(format!(
                 "custody-{}",
                 assignment.correlation_id
@@ -455,6 +530,7 @@ impl Warden for MpdPlaybackPlugin {
                 self.timeouts,
                 handle.clone(),
                 assignment.custody_state_reporter,
+                emitter,
             )
             .await
             {
@@ -582,9 +658,10 @@ mod tests {
     use evo_plugin_sdk::contract::{CustodyStateReporter, HealthStatus};
 
     use crate::playback_supervisor::test_mock::{
-        spawn_mock_mpd, spawn_unresponsive_mock, short_timeouts,
-        CapturingReporter, ConnBehaviour,
+        capturing_emitter, spawn_mock_mpd, spawn_unresponsive_mock,
+        short_timeouts, CapturingReporter, ConnBehaviour,
     };
+    use crate::playback_supervisor::SubjectEmitter;
 
     // ----- helpers -----
 
@@ -620,6 +697,10 @@ mod tests {
         let mut p =
             MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
         p.loaded = true;
+        // Tests using this helper are not exercising the subject
+        // emission pipeline; equip a null emitter to satisfy
+        // take_custody's gate without recording anything.
+        p.subject_emitter = Some(SubjectEmitter::null());
         (p, mock_task)
     }
 
@@ -1056,6 +1137,7 @@ mod tests {
         let (endpoint, _mock) = spawn_unresponsive_mock().await;
         let mut p = MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
         p.loaded = true;
+        p.subject_emitter = Some(SubjectEmitter::null());
 
         let reporter: Arc<dyn CustodyStateReporter> =
             Arc::new(CapturingReporter::default());
@@ -1159,5 +1241,109 @@ mod tests {
             p.health_check().await.status,
             HealthStatus::Unhealthy
         ));
+    }
+
+    // ===== Phase 3.4: subject emission through the warden =====
+
+    #[tokio::test]
+    async fn take_custody_rejects_when_subject_emitter_not_initialised() {
+        // Simulate the path where loaded=true has been set
+        // manually (e.g. by pre-3.4 legacy test code) but
+        // subject_emitter was not populated. Defense-in-depth
+        // gate should catch this.
+        let (endpoint, _mock) = spawn_mock_mpd(vec![
+            ConnBehaviour::Standard,
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+        let mut p = MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
+        p.loaded = true;
+        // subject_emitter is intentionally left as None.
+
+        let reporter: Arc<dyn CustodyStateReporter> =
+            Arc::new(CapturingReporter::default());
+        let e = p.take_custody(assignment(reporter, 1)).await.unwrap_err();
+        match e {
+            PluginError::Permanent(msg) => {
+                assert!(
+                    msg.contains("subject emitter"),
+                    "error should mention the emitter gate, got {msg:?}"
+                );
+            }
+            other => panic!("expected Permanent, got {other:?}"),
+        }
+        assert_eq!(p.active_custody_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn take_custody_with_populated_song_emits_subjects() {
+        let (endpoint, mock_task) = spawn_mock_mpd(vec![
+            ConnBehaviour::StandardWithSong {
+                file: "library/a/b/01.flac".to_string(),
+                title: "Track".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+            },
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+        let mut p = MpdPlaybackPlugin::with_endpoint(endpoint, short_timeouts());
+        p.loaded = true;
+
+        // Equip a capturing emitter so this test can verify the
+        // announcement actually reached the SDK surface.
+        let (subjects, relations, emitter) = capturing_emitter();
+        p.subject_emitter = Some(emitter);
+
+        let reporter: Arc<dyn CustodyStateReporter> =
+            Arc::new(CapturingReporter::default());
+        let handle =
+            p.take_custody(assignment(reporter, 77)).await.unwrap();
+
+        // Initial emission from spawn's emit_initial_report.
+        assert_eq!(subjects.count(), 2, "track + album at take-custody");
+        assert_eq!(relations.count(), 1, "album_of at take-custody");
+
+        let track = subjects.at(0).unwrap();
+        assert_eq!(track.subject_type, "track");
+        assert_eq!(track.addressings[0].scheme, "mpd-path");
+        assert_eq!(track.addressings[0].value, "library/a/b/01.flac");
+
+        let album = subjects.at(1).unwrap();
+        assert_eq!(album.subject_type, "album");
+        assert_eq!(album.addressings[0].scheme, "mpd-album");
+        assert_eq!(album.addressings[0].value, "Artist|Album");
+
+        let rel = relations.at(0).unwrap();
+        assert_eq!(rel.predicate, "album_of");
+        assert_eq!(rel.source.value, "library/a/b/01.flac");
+        assert_eq!(rel.target.value, "Artist|Album");
+
+        p.release_custody(handle).await.unwrap();
+        drop(mock_task);
+    }
+
+    #[tokio::test]
+    async fn take_custody_with_empty_song_emits_no_subjects() {
+        let (mut p, _mock) = loaded_plugin_with_mock(vec![
+            ConnBehaviour::Standard,
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+
+        // Replace the null emitter the helper installed with a
+        // capturing one so we can verify nothing was announced.
+        let (subjects, relations, emitter) = capturing_emitter();
+        p.subject_emitter = Some(emitter);
+
+        let reporter: Arc<dyn CustodyStateReporter> =
+            Arc::new(CapturingReporter::default());
+        let handle = p.take_custody(assignment(reporter, 9)).await.unwrap();
+
+        // Standard mock returns empty currentsong; no subjects.
+        assert_eq!(subjects.count(), 0);
+        assert_eq!(relations.count(), 0);
+
+        p.release_custody(handle).await.unwrap();
     }
 }

@@ -10,7 +10,7 @@ Everywhere this document names "Volumio", a future distribution reads "their own
 
 Six conditions must be true before work on any `evo-device-<brand>` distribution begins.
 
-1.  **The framework exists and is pinnable.** A tagged release of `evo-core` the distribution can depend on. For this distribution: evo-core v0.1.8.
+1.  **The framework exists and is pinnable.** A tagged release of `evo-core` the distribution can depend on. For this distribution: evo-core v0.1.9.
 2.  **The domain is stated.** A concept document in the distribution's own voice, naming what the device does in catalogue vocabulary (racks, shelves, relation predicates). Everything else flows from it. For this distribution: `volumio-evo-concept.md`.
 3.  **The target is chosen.** Hardware platform and operating system. For this distribution: Raspberry Pi, Raspberry Pi OS Lite, `aarch64`.
 4.  **The minimum is defined.** The one-sentence behaviour that makes the device a Proof of Concept rather than a scaffolded shell. For this distribution: "plays an audio file from local storage to the configured ALSA output, with metadata and artwork visible to any consumer that asks".
@@ -35,7 +35,7 @@ Three repositories are in scope for this distribution. Each has one job.
 ### 3.1 `evo-core` (upstream)
 
 -   Role: the framework. Source and engineering docs. Tagged releases.
--   Location: `github.com/foonerd/evo-core`, pinned at `v0.1.8`.
+-   Location: `github.com/foonerd/evo-core`, pinned at `v0.1.9`.
 -   What the distribution does with it: clones at the pinned tag during builds. Never modifies.
 
 ### 3.2 `evo-device-volumio` (this repository)

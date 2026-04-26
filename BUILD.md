@@ -20,7 +20,7 @@ The procedure is automated through the scripts in `scripts/`. Section 3 names th
 As of Milestones 0, 1, and 2 (SHOWCASE.md), the source repo is scaffolded, the conceptual foundation is documented, and the catalogue declares the fabric. What is actually executable today:
 
 -   Clone this repo, run `cargo build --workspace`. Succeeds trivially; the workspace has no members yet.
--   Clone `evo-core` at tag `v0.1.8`, cross-compile the steward binary for aarch64 (manually, or via `make build-steward` from `scripts/workstation/`).
+-   Clone `evo-core` at tag `v0.1.9`, cross-compile the steward binary for aarch64 (manually, or via `make build-steward` from `scripts/workstation/`).
 -   Run the built steward against `catalogue/volumio.toml`. Steward loads the catalogue (15 racks, 26 shelves) and starts cleanly with no plugins admitted.
 -   On a freshly-flashed Pi, run `sudo scripts/device/bootstrap.sh` to create the evo filesystem footprint and install a vendor public key (if supplied via `--trust-key`). The script's later phases (fetch manifest, verify, place pieces, install systemd unit) are marked pending and arrive as later milestones land.
 -   On a Pi, run `sudo scripts/device/reset.sh` to wipe the evo footprint cleanly. Useful during iteration; avoids re-flashing the SD card.
@@ -139,7 +139,7 @@ The manual equivalent, with commentary, follows.
 
 ### 6.1 Verify the pin
 
-The distribution's `Cargo.toml` declares `evo-plugin-sdk` via a git tag (currently `v0.1.8`). The steward binary must be built from the same tag (step 6.3). Check both match.
+The distribution's `Cargo.toml` declares `evo-plugin-sdk` via a git tag (currently `v0.1.9`). The steward binary must be built from the same tag (step 6.3). Check both match.
 
 ### 6.2 Cross-compile plugins
 
@@ -160,7 +160,7 @@ From the `evo-core` clone, at the pinned tag:
 
 ```
 cd ~/src/evo/evo-core
-git checkout v0.1.8
+git checkout v0.1.9
 cross build --release --target aarch64-unknown-linux-gnu -p evo
 ```
 

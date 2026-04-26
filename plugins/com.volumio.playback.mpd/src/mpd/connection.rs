@@ -545,13 +545,12 @@ fn parse_current_song(fields: &[Field]) -> Result<Option<MpdSong>, MpdError> {
             "duration" => {
                 duration = parse_duration_secs_field("duration", &f.value)?;
             }
-            "Time" => {
-                // Older MPD versions use integer seconds under `Time`.
-                // Only use as fallback when `duration` was not present.
-                if duration.is_none() {
-                    if let Ok(secs) = f.value.parse::<u64>() {
-                        duration = Some(Duration::from_secs(secs));
-                    }
+            "Time" if duration.is_none() => {
+                // Older MPD versions use integer seconds under
+                // `Time`. Only used as fallback when `duration`
+                // was not present.
+                if let Ok(secs) = f.value.parse::<u64>() {
+                    duration = Some(Duration::from_secs(secs));
                 }
             }
             _ => {}

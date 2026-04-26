@@ -10,7 +10,7 @@ A typo in an ALSA parameter is a one-line config edit, not a redeploy. A bug in 
 
 ```mermaid
 flowchart LR
-    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.8)"]
+    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.9)"]
     src["<b>evo-device-volumio</b><br/><i>this repo</i><br/>catalogue + plugins + branding"]
     art["<b>evo-device-volumio-artefacts</b><br/><i>release plane</i><br/>manifest + signed bytes"]
     dev["<b>Device</b><br/><i>Raspberry Pi</i><br/>Pi OS Lite aarch64"]
@@ -93,7 +93,7 @@ Early. Foundation is complete; Milestone 3 (first plugin) is in progress. The wa
 
 -   Milestone 4 - `com.volumio.artwork.local` stocking `artwork.providers` (second plugin, first multi-piece composition).
 
-`evo-core` is pinned at tag `v0.1.8` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
+`evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 
 ## For distributions that follow
 

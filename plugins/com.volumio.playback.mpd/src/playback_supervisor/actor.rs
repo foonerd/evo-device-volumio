@@ -11,7 +11,7 @@
 //!
 //! Two tokio tasks communicating via channels:
 //!
-//! - **Main supervisor task** ([`supervisor_run`]): owns
+//! - **Main supervisor task** ([`SupervisorTask::run`]): owns
 //!   `command_connection`. Receives [`SupervisorMessage`] values
 //!   from an `mpsc::Receiver`, dispatches them against the command
 //!   connection, emits state reports through the reporter. Handles
@@ -62,11 +62,13 @@ use evo_plugin_sdk::contract::{CustodyHandle, CustodyStateReporter, HealthStatus
 
 use crate::mpd::{
     ConnectTimeouts, IdleSubsystem, MpdConnection, MpdEndpoint, MpdError,
+    MpdSong,
 };
 use crate::PLUGIN_NAME;
 
 use super::command::{PlaybackCommand, PlaybackError};
 use super::report::PlaybackStateReport;
+use super::subject_emitter::SubjectEmitter;
 
 // ----- tuning constants -----
 
@@ -151,11 +153,21 @@ impl SupervisorHandle {
 /// failing to be produced, aborts the whole spawn: no tasks are
 /// spawned, no resources leak. The caller's `take_custody` impl
 /// propagates the error.
+///
+/// Subject emission (track + album + `album_of` relation) is
+/// piggy-backed on the initial state report: if MPD reports a
+/// current song at spawn time, the [`SubjectEmitter`] is invoked
+/// before the first custody-state report is acknowledged. This
+/// gives the album-art respondent something to walk from the
+/// moment playback becomes active. Subject-emission failures are
+/// logged but not propagated (the state report is authoritative
+/// for spawn success).
 pub(crate) async fn spawn(
     endpoint: MpdEndpoint,
     timeouts: ConnectTimeouts,
     custody_handle: CustodyHandle,
     reporter: Arc<dyn CustodyStateReporter>,
+    subject_emitter: SubjectEmitter,
 ) -> Result<SupervisorHandle, PlaybackError> {
     tracing::info!(
         plugin = PLUGIN_NAME,
@@ -178,11 +190,18 @@ pub(crate) async fn spawn(
     .map_err(classify_connect_error)?;
 
     // Initial report: failure here means MPD is unusable, so bail
-    // before spawning anything.
+    // before spawning anything. The same query populates
+    // `last_emitted_file` so the supervisor task starts with an
+    // accurate "what has been announced already" state; a
+    // subsequent idle wake on the same song will not re-announce
+    // it.
+    let mut last_emitted_file: Option<String> = None;
     emit_initial_report(
         &mut cmd_conn,
         &custody_handle,
         reporter.as_ref(),
+        &subject_emitter,
+        &mut last_emitted_file,
     )
     .await?;
 
@@ -195,15 +214,26 @@ pub(crate) async fn spawn(
     let idle_endpoint = endpoint.clone();
     tokio::spawn(idle_task(idle_conn, idle_endpoint, timeouts, idle_tx));
 
-    let task_handle = tokio::spawn(supervisor_run(
+    // Bundle the per-task state into a struct and hand it to the
+    // supervisor task. The struct holds everything the run loop
+    // needs across iterations (connection, endpoint for reconnect,
+    // timeouts, custody handle, reporter, subject emitter,
+    // last-emitted-file gate); the channels stay as independent
+    // arguments to the run method because they have shorter
+    // lifetimes tied to the task body.
+    let task_state = SupervisorTask {
         cmd_conn,
         endpoint,
         timeouts,
+        custody_handle,
+        reporter,
+        subject_emitter,
+        last_emitted_file,
+    };
+    let task_handle = tokio::spawn(task_state.run(
         command_rx,
         shutdown_rx,
         idle_rx,
-        custody_handle,
-        reporter,
     ));
 
     Ok(SupervisorHandle {
@@ -277,83 +307,111 @@ impl BackoffState {
 
 // ----- main supervisor task -----
 
-async fn supervisor_run(
-    mut cmd_conn: MpdConnection,
+/// Per-task state for the main supervisor loop.
+///
+/// Bundles every piece of state the run loop carries across
+/// iterations. Reduces what would otherwise be a ten-parameter
+/// free function to a single `self` plus the three channel
+/// receivers; the channel receivers stay as run-method
+/// arguments because their lifetime is strictly bounded by the
+/// task body, whereas every field here has to survive every
+/// iteration of the select loop.
+///
+/// Constructed by [`spawn`] after the initial state report lands
+/// successfully; the struct is moved into [`tokio::spawn`] as
+/// part of the returned future.
+struct SupervisorTask {
+    cmd_conn: MpdConnection,
     endpoint: MpdEndpoint,
     timeouts: ConnectTimeouts,
-    mut command_rx: mpsc::Receiver<SupervisorMessage>,
-    mut shutdown_rx: oneshot::Receiver<()>,
-    mut idle_rx: mpsc::Receiver<IdleEvent>,
     custody_handle: CustodyHandle,
     reporter: Arc<dyn CustodyStateReporter>,
-) {
-    tracing::info!(
-        plugin = PLUGIN_NAME,
-        handle = %custody_handle.id,
-        "playback supervisor task started"
-    );
+    subject_emitter: SubjectEmitter,
+    last_emitted_file: Option<String>,
+}
 
-    loop {
-        tokio::select! {
-            biased;
-            _ = &mut shutdown_rx => {
-                tracing::info!(
-                    plugin = PLUGIN_NAME,
-                    handle = %custody_handle.id,
-                    "supervisor received shutdown signal"
-                );
-                return;
-            }
-            msg = command_rx.recv() => {
-                match msg {
-                    None => {
-                        tracing::info!(
-                            plugin = PLUGIN_NAME,
-                            handle = %custody_handle.id,
-                            "command channel closed; supervisor exiting"
-                        );
-                        return;
-                    }
-                    Some(SupervisorMessage::Command { cmd, reply }) => {
-                        let result = handle_command(
-                            cmd,
-                            &mut cmd_conn,
-                            &endpoint,
-                            timeouts,
-                        ).await;
-                        let ok = result.is_ok();
-                        let _ = reply.send(result);
-                        if ok {
-                            emit_best_effort_report(
-                                &mut cmd_conn,
-                                &custody_handle,
-                                reporter.as_ref(),
+impl SupervisorTask {
+    /// The supervisor task body. Consumes `self` (the run is the
+    /// whole life of the task) and the three channel receivers,
+    /// and loops until shutdown or one of the channels closes.
+    async fn run(
+        mut self,
+        mut command_rx: mpsc::Receiver<SupervisorMessage>,
+        mut shutdown_rx: oneshot::Receiver<()>,
+        mut idle_rx: mpsc::Receiver<IdleEvent>,
+    ) {
+        tracing::info!(
+            plugin = PLUGIN_NAME,
+            handle = %self.custody_handle.id,
+            "playback supervisor task started"
+        );
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut shutdown_rx => {
+                    tracing::info!(
+                        plugin = PLUGIN_NAME,
+                        handle = %self.custody_handle.id,
+                        "supervisor received shutdown signal"
+                    );
+                    return;
+                }
+                msg = command_rx.recv() => {
+                    match msg {
+                        None => {
+                            tracing::info!(
+                                plugin = PLUGIN_NAME,
+                                handle = %self.custody_handle.id,
+                                "command channel closed; supervisor exiting"
+                            );
+                            return;
+                        }
+                        Some(SupervisorMessage::Command { cmd, reply }) => {
+                            let result = handle_command(
+                                cmd,
+                                &mut self.cmd_conn,
+                                &self.endpoint,
+                                self.timeouts,
                             ).await;
+                            let ok = result.is_ok();
+                            let _ = reply.send(result);
+                            if ok {
+                                emit_best_effort_report(
+                                    &mut self.cmd_conn,
+                                    &self.custody_handle,
+                                    self.reporter.as_ref(),
+                                    &self.subject_emitter,
+                                    &mut self.last_emitted_file,
+                                ).await;
+                            }
                         }
                     }
                 }
-            }
-            evt = idle_rx.recv() => {
-                match evt {
-                    None | Some(IdleEvent::Exhausted) => {
-                        tracing::warn!(
-                            plugin = PLUGIN_NAME,
-                            handle = %custody_handle.id,
-                            "idle task terminated; continuing command-only"
-                        );
-                    }
-                    Some(IdleEvent::Changed(changed)) => {
-                        tracing::debug!(
-                            plugin = PLUGIN_NAME,
-                            handle = %custody_handle.id,
-                            changed_count = changed.len(),
-                            "idle wake"
-                        );
-                        emit_best_effort_report(
-                            &mut cmd_conn,
-                            &custody_handle,
-                            reporter.as_ref(),
-                        ).await;
+                evt = idle_rx.recv() => {
+                    match evt {
+                        None | Some(IdleEvent::Exhausted) => {
+                            tracing::warn!(
+                                plugin = PLUGIN_NAME,
+                                handle = %self.custody_handle.id,
+                                "idle task terminated; continuing command-only"
+                            );
+                        }
+                        Some(IdleEvent::Changed(changed)) => {
+                            tracing::debug!(
+                                plugin = PLUGIN_NAME,
+                                handle = %self.custody_handle.id,
+                                changed_count = changed.len(),
+                                "idle wake"
+                            );
+                            emit_best_effort_report(
+                                &mut self.cmd_conn,
+                                &self.custody_handle,
+                                self.reporter.as_ref(),
+                                &self.subject_emitter,
+                                &mut self.last_emitted_file,
+                            ).await;
+                        }
                     }
                 }
             }
@@ -488,12 +546,18 @@ async fn emit_initial_report(
     cmd_conn: &mut MpdConnection,
     custody_handle: &CustodyHandle,
     reporter: &dyn CustodyStateReporter,
+    subject_emitter: &SubjectEmitter,
+    last_emitted_file: &mut Option<String>,
 ) -> Result<(), PlaybackError> {
     let status = cmd_conn.status().await.map_err(classify_command_error)?;
     let song = cmd_conn
         .current_song()
         .await
         .map_err(classify_command_error)?;
+    // Clone before handing to the report projection so the
+    // emitter can read the same song. MpdSong is cheap to clone
+    // (a small fixed set of Option<String> plus a short String).
+    let song_for_emitter = song.clone();
     let report = PlaybackStateReport::from_mpd(status, song);
     let payload = report.serialise().into_bytes();
     if let Err(e) = reporter
@@ -507,6 +571,8 @@ async fn emit_initial_report(
             "initial state report delivery failed; spawn proceeds anyway"
         );
     }
+    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file)
+        .await;
     Ok(())
 }
 
@@ -514,6 +580,8 @@ async fn emit_best_effort_report(
     cmd_conn: &mut MpdConnection,
     custody_handle: &CustodyHandle,
     reporter: &dyn CustodyStateReporter,
+    subject_emitter: &SubjectEmitter,
+    last_emitted_file: &mut Option<String>,
 ) {
     let status = match cmd_conn.status().await {
         Ok(s) => s,
@@ -539,6 +607,7 @@ async fn emit_best_effort_report(
             return;
         }
     };
+    let song_for_emitter = song.clone();
     let report = PlaybackStateReport::from_mpd(status, song);
     let payload = report.serialise().into_bytes();
     if let Err(e) = reporter
@@ -552,6 +621,38 @@ async fn emit_best_effort_report(
             "state report delivery failed"
         );
     }
+    maybe_emit_subjects(&song_for_emitter, subject_emitter, last_emitted_file)
+        .await;
+}
+
+/// Invoke the [`SubjectEmitter`] for a song if (and only if) its
+/// `file_path` differs from what was last emitted. A `None` song
+/// (MPD reported no current song) is a no-op. The first call
+/// with a given file path always emits; a subsequent call with
+/// the same path is a no-op.
+///
+/// Rationale: subject/relation announcements are stable on
+/// repeat, but they are not free; idle wakes can fire for mixer
+/// and options changes that do not imply a song change, and
+/// command dispatches re-emit a report each time. Gating on the
+/// song URI keeps the steward's registry traffic proportional to
+/// real song changes.
+async fn maybe_emit_subjects(
+    song: &Option<MpdSong>,
+    emitter: &SubjectEmitter,
+    last_emitted_file: &mut Option<String>,
+) {
+    let Some(song) = song.as_ref() else {
+        return;
+    };
+    if song.file_path.is_empty() {
+        return;
+    }
+    if last_emitted_file.as_deref() == Some(song.file_path.as_str()) {
+        return;
+    }
+    emitter.emit_song(song).await;
+    *last_emitted_file = Some(song.file_path.clone());
 }
 
 // ----- idle task -----
@@ -641,8 +742,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::super::test_mock::{
-        spawn_mock_mpd, short_timeouts, test_custody_handle, CapturingReporter,
-        ConnBehaviour,
+        capturing_emitter, spawn_mock_mpd, short_timeouts,
+        test_custody_handle, CapturingReporter, ConnBehaviour,
     };
 
     // ----- backoff unit tests -----
@@ -691,6 +792,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -722,6 +824,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -767,6 +870,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -809,6 +913,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -836,6 +941,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -865,6 +971,7 @@ mod tests {
             short_timeouts(),
             test_custody_handle(),
             reporter_dyn,
+            SubjectEmitter::null(),
         )
         .await
         .unwrap();
@@ -879,6 +986,204 @@ mod tests {
             "expected >= 2 reports (initial + idle-triggered), got {}",
             reporter.count()
         );
+
+        handle.shutdown().await;
+    }
+
+    // ----- Phase 3.4: subject-emission integration tests -----
+
+    #[tokio::test]
+    async fn spawn_with_playing_song_emits_track_album_and_relation() {
+        let (endpoint, _mock) = spawn_mock_mpd(vec![
+            ConnBehaviour::StandardWithSong {
+                file: "library/pf/thewall/01.flac".to_string(),
+                title: "In the Flesh?".to_string(),
+                artist: "Pink Floyd".to_string(),
+                album: "The Wall".to_string(),
+            },
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+
+        let reporter = Arc::new(CapturingReporter::default());
+        let reporter_dyn: Arc<dyn CustodyStateReporter> = reporter.clone();
+        let (subjects, relations, emitter) = capturing_emitter();
+
+        let handle = spawn(
+            endpoint,
+            short_timeouts(),
+            test_custody_handle(),
+            reporter_dyn,
+            emitter,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            subjects.count(),
+            2,
+            "expected track + album announcements at spawn, got {}",
+            subjects.count()
+        );
+        assert_eq!(
+            relations.count(),
+            1,
+            "expected 1 album_of assertion at spawn"
+        );
+
+        let track = subjects.at(0).unwrap();
+        assert_eq!(track.subject_type, "track");
+        assert_eq!(track.addressings[0].scheme, "mpd-path");
+        assert_eq!(
+            track.addressings[0].value,
+            "library/pf/thewall/01.flac"
+        );
+
+        let album = subjects.at(1).unwrap();
+        assert_eq!(album.subject_type, "album");
+        assert_eq!(album.addressings[0].scheme, "mpd-album");
+        assert_eq!(
+            album.addressings[0].value,
+            "Pink Floyd|The Wall"
+        );
+
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn spawn_with_empty_currentsong_emits_no_subjects() {
+        // Standard mock returns empty `OK\n` for currentsong;
+        // the supervisor should not invoke the emitter at all.
+        let (endpoint, _mock) = spawn_mock_mpd(vec![
+            ConnBehaviour::Standard,
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+
+        let reporter = Arc::new(CapturingReporter::default());
+        let reporter_dyn: Arc<dyn CustodyStateReporter> = reporter.clone();
+        let (subjects, relations, emitter) = capturing_emitter();
+
+        let handle = spawn(
+            endpoint,
+            short_timeouts(),
+            test_custody_handle(),
+            reporter_dyn,
+            emitter,
+        )
+        .await
+        .unwrap();
+
+        // Initial state report still happens; subjects do not.
+        assert_eq!(reporter.count(), 1);
+        assert_eq!(subjects.count(), 0);
+        assert_eq!(relations.count(), 0);
+
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn idle_event_on_same_song_does_not_reemit_subjects() {
+        // cmd_conn = StandardWithSong so every currentsong
+        // query returns the same populated song.
+        // idle_conn = IdleOnceThenHold so the first idle call
+        // receives `changed: player`, triggering a follow-up
+        // state report and subject-emission gate.
+        let (endpoint, _mock) = spawn_mock_mpd(vec![
+            ConnBehaviour::StandardWithSong {
+                file: "a.flac".to_string(),
+                title: "Track One".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+            },
+            ConnBehaviour::IdleOnceThenHold,
+        ])
+        .await;
+
+        let reporter = Arc::new(CapturingReporter::default());
+        let reporter_dyn: Arc<dyn CustodyStateReporter> = reporter.clone();
+        let (subjects, relations, emitter) = capturing_emitter();
+
+        let handle = spawn(
+            endpoint,
+            short_timeouts(),
+            test_custody_handle(),
+            reporter_dyn,
+            emitter,
+        )
+        .await
+        .unwrap();
+
+        // Wait for the idle event + follow-up report to land.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Two state reports (initial + idle-triggered), but
+        // only the initial emission because the song URI has
+        // not changed since the first emit.
+        assert!(
+            reporter.count() >= 2,
+            "expected >= 2 reports, got {}",
+            reporter.count()
+        );
+        assert_eq!(
+            subjects.count(),
+            2,
+            "expected only initial track + album (2), got {}",
+            subjects.count()
+        );
+        assert_eq!(
+            relations.count(),
+            1,
+            "expected only initial album_of (1), got {}",
+            relations.count()
+        );
+
+        handle.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn command_on_same_song_does_not_reemit_subjects() {
+        // cmd_conn = StandardWithSong so every currentsong
+        // query returns the same populated song. Issuing a
+        // command triggers a follow-up state report but not
+        // a follow-up subject emission.
+        let (endpoint, _mock) = spawn_mock_mpd(vec![
+            ConnBehaviour::StandardWithSong {
+                file: "a.flac".to_string(),
+                title: "T".to_string(),
+                artist: "A".to_string(),
+                album: "B".to_string(),
+            },
+            ConnBehaviour::HoldAfterWelcome,
+        ])
+        .await;
+
+        let reporter = Arc::new(CapturingReporter::default());
+        let reporter_dyn: Arc<dyn CustodyStateReporter> = reporter.clone();
+        let (subjects, relations, emitter) = capturing_emitter();
+
+        let handle = spawn(
+            endpoint,
+            short_timeouts(),
+            test_custody_handle(),
+            reporter_dyn,
+            emitter,
+        )
+        .await
+        .unwrap();
+
+        // Initial emission already happened.
+        assert_eq!(subjects.count(), 2);
+        assert_eq!(relations.count(), 1);
+
+        handle.command(PlaybackCommand::Play).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // State reports: initial + post-command = 2. Subjects:
+        // unchanged, because the song did not change.
+        assert_eq!(reporter.count(), 2);
+        assert_eq!(subjects.count(), 2);
+        assert_eq!(relations.count(), 1);
 
         handle.shutdown().await;
     }

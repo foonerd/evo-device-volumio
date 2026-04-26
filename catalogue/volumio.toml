@@ -16,6 +16,21 @@
 #     warden) and Milestone 4 (album-art respondent) strictly need:
 #     track <-> album. Further predicates (has_artwork, performed_by,
 #     composed_by, etc.) arrive with the plugins that assert them.
+#
+# Subject types: every type used in `[[relation]]` must be listed in
+# `[[subjects]]` (see CATALOGUE.md section 5).
+
+# ============================================================
+# Subject types
+# ============================================================
+
+[[subjects]]
+name = "track"
+description = "A playable audio item (current song, queue item)."
+
+[[subjects]]
+name = "album"
+description = "A collection of tracks with shared release metadata."
 
 
 # ============================================================

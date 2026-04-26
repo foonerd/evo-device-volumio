@@ -10,9 +10,8 @@ Contributor workflow for this repository. Companion to the Milestone 1 scaffoldi
 
 ## Prerequisites
 
--   Rust stable, matching the workspace `rust-version = "1.80"`.
--   Network access to github.com/foonerd for the `evo-plugin-sdk` git dependency.
--   A local checkout of [foonerd/evo-core](https://github.com/foonerd/evo-core) at tag `v0.1.8` if you want to run the steward against this repo's catalogue (see "Running the steward" below).
+-   Rust **1.85** or newer, matching the workspace `rust-version` (same MSRV as [evo-core](https://github.com/foonerd/evo-core)).
+-   A **sibling** clone of [foonerd/evo-core](https://github.com/foonerd/evo-core) next to this repository (`../evo-core`), because `[workspace.dependencies]` currently points `evo-plugin-sdk` at `../evo-core/crates/evo-plugin-sdk` (same sources as the upcoming **`v0.1.9`** tag). After `v0.1.9` is published on GitHub, replace that path with the git + tag pin (see comment in the root `Cargo.toml`) so checkouts without a local `evo-core` tree resolve from the network alone.
 
 ## Workspace conventions
 
