@@ -14,14 +14,20 @@ This document is the **authoritative field catalogue** for the success and error
 |---------|--------|----------|-------------|
 | `v`     | number | yes      | Must be `1`. |
 | `target`| object | yes      | Subject selector (same shape as `artwork.resolve`). |
-| `target.scheme` | string | yes | `mpd-path` (MPD `file` relative to `[library] roots` or absolute). `mpd-album` returns `unsupported`. |
-| `target.value`  | string | yes | Path or album key per scheme. |
+| `target.scheme` | string | yes | `mpd-path` (MPD `file` relative to `[library] roots` or absolute) or `mpd-album` (see below). |
+| `target.value`  | string | yes | MPD `file` path, or for `mpd-album` the compound `artist|album` (only the first pipe splits; the album part may contain further pipes). |
 
 **Example**
 
 ```json
 { "v": 1, "target": { "scheme": "mpd-path", "value": "Classical/Bach/01.flac" } }
 ```
+
+**`mpd-album`**
+
+- **Value** matches `com.volumio.playback.mpd` album subject addressing: `"{artist}|{album}"`, with `unknown` for missing/empty `Artist` (per the playback warden).
+- **Resolution:** depth-first search under each `[library] root` in config order, directory entries sorted by name; the **first** local audio file whose **primary** tag `artist` and `album` match the request (after trim; missing artist in the file is treated as `unknown`) is used. The scan is bounded (at most 100,000 file reads per request); over the limit returns `not_found` with a `detail` string.
+- **Not MPD:** this path does not query MPD; it is suitable for offline/standalone libraries.
 
 ---
 

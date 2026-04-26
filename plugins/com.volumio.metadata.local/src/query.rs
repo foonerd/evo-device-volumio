@@ -1,4 +1,4 @@
-//! `metadata.query` v1: resolve tag metadata for a track file (MPD `mpd-path`).
+//! `metadata.query` v1: resolve tag metadata for a track or album subject (`mpd-path`, `mpd-album`).
 //! Response includes grouped fields for classical, credits, MusicBrainz, dates, and file properties.
 //!
 //! Full wire field catalogue: `docs/METADATA_QUERY_V1.md` (in this plugin directory).
@@ -17,7 +17,7 @@ use serde::Serialize;
 
 /// `mpd-path`: MPD's `file` (library-relative or absolute).
 pub(crate) const SCHEME_MPD_PATH: &str = "mpd-path";
-/// `mpd-album`: `Artist|Album` — not implemented here.
+/// `mpd-album`: `Artist|Album` — first matching track under [library] roots (tag scan via `evo_volumio_library`).
 pub(crate) const SCHEME_MPD_ALBUM: &str = "mpd-album";
 
 /// Truncate very large tag values (e.g. embedded lyrics) for stable memory on devices.
@@ -284,6 +284,8 @@ pub(crate) struct FileMetadata {
 pub(crate) enum ResponseStatus {
     Ok,
     NotFound,
+    /// JSON wire value retained for forward compatibility; not used by this plugin.
+    #[allow(dead_code)]
     Unsupported,
     BadRequest,
 }
@@ -735,7 +737,7 @@ fn read_file_metadata(path: &Path) -> Result<MetadataQueryResponse, String> {
 
 // ---- request handling ------------------------------------------------------
 
-/// Handle a `metadata.query` payload: parse JSON, resolve `mpd-path` to a file, read tags.
+/// Handle a `metadata.query` payload: parse JSON, resolve `mpd-path` or `mpd-album`, read tags.
 pub(crate) fn query_metadata(
     library_roots: &[PathBuf],
     payload: &[u8],
@@ -775,14 +777,64 @@ pub(crate) fn query_metadata(
     }
 
     match req.target.scheme.as_str() {
-        SCHEME_MPD_ALBUM => Ok(MetadataQueryResponse::v1_error(
-            ResponseStatus::Unsupported,
-            Some(
-                "mpd_album: use scheme mpd-path with the track file until graph or library \
-                 resolution exists"
-                    .to_string(),
-            ),
-        )),
+        SCHEME_MPD_ALBUM => {
+            let (artist, album) =
+                match evo_volumio_library::parse_mpd_album_value(&req.target.value) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Ok(MetadataQueryResponse::v1_error(
+                            ResponseStatus::BadRequest,
+                            Some(
+                                "invalid mpd-album value: expected \"artist|album\" (see \
+                             com.volumio.playback.mpd subject emission)"
+                                    .to_string(),
+                            ),
+                        ));
+                    }
+                };
+            let found = match evo_volumio_library::first_matching_audio_path(
+                library_roots,
+                &artist,
+                &album,
+            ) {
+                Ok(p) => p,
+                Err(evo_volumio_library::MatchError::LimitExceeded) => {
+                    return Ok(MetadataQueryResponse::v1_error(
+                        ResponseStatus::NotFound,
+                        Some(format!(
+                            "mpd_album: scan limit ({} files) reached under [library] roots",
+                            evo_volumio_library::MAX_MPD_ALBUM_SCAN_CANDIDATES
+                        )),
+                    ));
+                }
+                Err(evo_volumio_library::MatchError::Io(m)) => {
+                    return Ok(MetadataQueryResponse::v1_error(
+                        ResponseStatus::NotFound,
+                        Some(m),
+                    ));
+                }
+            };
+            let Some(path) = found else {
+                return Ok(MetadataQueryResponse::v1_error(
+                    ResponseStatus::NotFound,
+                    Some(
+                        "mpd_album: no file under [library] roots with matching track artist and \
+                         album tags"
+                            .to_string(),
+                    ),
+                ));
+            };
+            let mut r = read_file_metadata(&path).unwrap_or_else(|e| {
+                MetadataQueryResponse::v1_error(ResponseStatus::NotFound, Some(e))
+            });
+            if r.status == ResponseStatus::Ok {
+                r.detail = Some(
+                    "target mpd-album: first matching file under [library] roots (local tag scan)"
+                        .to_string(),
+                );
+            }
+            Ok(r)
+        }
         SCHEME_MPD_PATH => {
             if req.target.value.is_empty() {
                 return Ok(MetadataQueryResponse::v1_error(
@@ -796,12 +848,10 @@ pub(crate) fn query_metadata(
                     Some("audio file not found for mpd_path".to_string()),
                 ));
             };
-            read_file_metadata(&path).or_else(|e| {
-                Ok(MetadataQueryResponse::v1_error(
-                    ResponseStatus::NotFound,
-                    Some(e),
-                ))
-            })
+            let r = read_file_metadata(&path).unwrap_or_else(|e| {
+                MetadataQueryResponse::v1_error(ResponseStatus::NotFound, Some(e))
+            });
+            Ok(r)
         }
         other => Ok(MetadataQueryResponse::v1_error(
             ResponseStatus::BadRequest,
@@ -905,5 +955,32 @@ mod tests {
             e.get("TXXX:my_vendor").map(String::as_str),
             Some("opaque value")
         );
+    }
+
+    #[test]
+    fn mpd_album_resolves_first_matching_track() {
+        use lofty::config::WriteOptions;
+        use lofty::tag::Accessor;
+        use lofty::tag::TagExt;
+        use lofty::tag::TagType;
+
+        const MINI_MP3: &[u8] =
+            include_bytes!("../../../crates/evo-volumio-library/assets/minimal.mp3");
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("ScanA").join("ScanB");
+        std::fs::create_dir_all(&sub).unwrap();
+        let mp3 = sub.join("1.mp3");
+        std::fs::write(&mp3, MINI_MP3).unwrap();
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.set_artist("ScanA".to_string());
+        tag.set_album("ScanB".to_string());
+        tag.set_title("T1".to_string());
+        tag.save_to_path(&mp3, WriteOptions::new().preferred_padding(0))
+            .expect("tag save");
+        let body = r##"{"v":1,"target":{"scheme":"mpd-album","value":"ScanA|ScanB"}}"##;
+        let r = query_metadata(&[dir.path().to_path_buf()], body.as_bytes()).unwrap();
+        assert_eq!(r.status, ResponseStatus::Ok);
+        assert_eq!(r.title.as_deref(), Some("T1"));
+        assert!(r.detail.as_deref().unwrap_or("").contains("mpd-album"));
     }
 }

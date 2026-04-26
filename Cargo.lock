@@ -58,6 +58,7 @@ name = "com-volumio-artwork-local"
 version = "0.1.0"
 dependencies = [
  "evo-plugin-sdk",
+ "evo-volumio-library",
  "lofty",
  "semver",
  "serde",
@@ -74,6 +75,7 @@ name = "com-volumio-metadata-local"
 version = "0.1.0"
 dependencies = [
  "evo-plugin-sdk",
+ "evo-volumio-library",
  "lofty",
  "semver",
  "serde",
@@ -143,6 +145,14 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "evo-volumio-library"
+version = "0.1.0"
+dependencies = [
+ "lofty",
+ "tempfile",
 ]
 
 [[package]]

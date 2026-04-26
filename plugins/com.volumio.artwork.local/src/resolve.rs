@@ -64,6 +64,8 @@ pub(crate) struct ArtworkResolveResponse {
 pub(crate) enum ResponseStatus {
     Ok,
     NotFound,
+    /// Retained for forward-compatible JSON; not emitted by this version.
+    #[allow(dead_code)]
     Unsupported,
     BadRequest,
 }
@@ -180,21 +182,8 @@ pub(crate) fn resolve_artwork(
     }
 
     match req.target.scheme.as_str() {
-        SCHEME_MPD_ALBUM => Ok(ArtworkResolveResponse {
-            v: 1,
-            status: ResponseStatus::Unsupported,
-            path: None,
-            mime: None,
-            detail: Some(
-                "mpd_album: directory resolution is not available yet; use scheme mpd-path with the track file"
-                    .to_string(),
-            ),
-        }),
-        SCHEME_MPD_PATH => resolve_mpd_path(
-            library_roots,
-            state_dir,
-            &req.target.value,
-        ),
+        SCHEME_MPD_ALBUM => resolve_mpd_album(library_roots, state_dir, &req.target.value),
+        SCHEME_MPD_PATH => resolve_mpd_path(library_roots, state_dir, &req.target.value),
         other => Ok(ArtworkResolveResponse {
             v: 1,
             status: ResponseStatus::BadRequest,
@@ -203,6 +192,103 @@ pub(crate) fn resolve_artwork(
             detail: Some(format!("unknown target.scheme: {other}")),
         }),
     }
+}
+
+fn resolve_mpd_album(
+    library_roots: &[PathBuf],
+    state_dir: Option<&Path>,
+    value: &str,
+) -> Result<ArtworkResolveResponse, String> {
+    let (artist, album) = match evo_volumio_library::parse_mpd_album_value(value) {
+        Ok(p) => p,
+        Err(_) => {
+            return Ok(ArtworkResolveResponse {
+                v: 1,
+                status: ResponseStatus::BadRequest,
+                path: None,
+                mime: None,
+                detail: Some(
+                    "invalid mpd-album value: expected \"artist|album\" (see \
+                     com.volumio.playback.mpd subject emission)"
+                        .to_string(),
+                ),
+            });
+        }
+    };
+    let found = match evo_volumio_library::first_matching_audio_path(library_roots, &artist, &album)
+    {
+        Ok(p) => p,
+        Err(evo_volumio_library::MatchError::LimitExceeded) => {
+            return Ok(ArtworkResolveResponse {
+                v: 1,
+                status: ResponseStatus::NotFound,
+                path: None,
+                mime: None,
+                detail: Some(format!(
+                    "mpd_album: scan limit ({} files) reached under [library] roots",
+                    evo_volumio_library::MAX_MPD_ALBUM_SCAN_CANDIDATES
+                )),
+            });
+        }
+        Err(evo_volumio_library::MatchError::Io(m)) => {
+            return Ok(ArtworkResolveResponse {
+                v: 1,
+                status: ResponseStatus::NotFound,
+                path: None,
+                mime: None,
+                detail: Some(m),
+            });
+        }
+    };
+    let Some(track_path) = found else {
+        return Ok(ArtworkResolveResponse {
+            v: 1,
+            status: ResponseStatus::NotFound,
+            path: None,
+            mime: None,
+            detail: Some(
+                "mpd_album: no file under [library] roots with matching track artist and album \
+                 tags"
+                    .to_string(),
+            ),
+        });
+    };
+    resolve_cover_for_audio_file(state_dir, &track_path)
+}
+
+/// Sidecar and embedded art for a resolved on-disk track path.
+fn resolve_cover_for_audio_file(
+    state_dir: Option<&Path>,
+    track_path: &Path,
+) -> Result<ArtworkResolveResponse, String> {
+    if let Some(cover) = find_cover_beside_audio_file(track_path) {
+        return ok_from_path(cover);
+    }
+
+    if let Some(img) = embedded::read_embedded_cover(track_path) {
+        let Some(dir) = state_dir else {
+            return Ok(ArtworkResolveResponse {
+                v: 1,
+                status: ResponseStatus::NotFound,
+                path: None,
+                mime: None,
+                detail: Some(
+                    "embedded cover in tags but no state_dir to write cache; cannot expose path"
+                        .to_string(),
+                ),
+            });
+        };
+        let cached = embedded::write_embedded_to_cache(dir, track_path, &img)?;
+        return ok_from_path(cached);
+    }
+
+    Ok(ArtworkResolveResponse {
+        v: 1,
+        status: ResponseStatus::NotFound,
+        path: None,
+        mime: None,
+        detail: Some("no sidecar or embedded cover for this track".to_string()),
+    })
 }
 
 fn ok_from_path(cover: PathBuf) -> Result<ArtworkResolveResponse, String> {
@@ -245,34 +331,7 @@ fn resolve_mpd_path(
         });
     };
 
-    if let Some(cover) = find_cover_beside_audio_file(&track_path) {
-        return ok_from_path(cover);
-    }
-
-    if let Some(img) = embedded::read_embedded_cover(&track_path) {
-        let Some(dir) = state_dir else {
-            return Ok(ArtworkResolveResponse {
-                v: 1,
-                status: ResponseStatus::NotFound,
-                path: None,
-                mime: None,
-                detail: Some(
-                    "embedded cover in tags but no state_dir to write cache; cannot expose path"
-                        .to_string(),
-                ),
-            });
-        };
-        let cached = embedded::write_embedded_to_cache(dir, &track_path, &img)?;
-        return ok_from_path(cached);
-    }
-
-    Ok(ArtworkResolveResponse {
-        v: 1,
-        status: ResponseStatus::NotFound,
-        path: None,
-        mime: None,
-        detail: Some("no sidecar or embedded cover for this track".to_string()),
-    })
+    resolve_cover_for_audio_file(state_dir, &track_path)
 }
 
 #[cfg(test)]
@@ -320,5 +379,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.status, ResponseStatus::NotFound);
+    }
+
+    #[test]
+    fn resolve_mpd_album_sidecar() {
+        use lofty::config::WriteOptions;
+        use lofty::tag::Accessor;
+        use lofty::tag::Tag;
+        use lofty::tag::TagExt;
+        use lofty::tag::TagType;
+
+        const MINI_MP3: &[u8] =
+            include_bytes!("../../../crates/evo-volumio-library/assets/minimal.mp3");
+        let dir = tempfile::tempdir().unwrap();
+        let album_dir = dir.path().join("ArtZ").join("AlbZ");
+        std::fs::create_dir_all(&album_dir).unwrap();
+        let flac = album_dir.join("t.mp3");
+        std::fs::write(&flac, MINI_MP3).unwrap();
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.set_artist("ArtZ".to_string());
+        tag.set_album("AlbZ".to_string());
+        tag.save_to_path(&flac, WriteOptions::new().preferred_padding(0))
+            .expect("tag save");
+        std::fs::write(album_dir.join("folder.jpg"), b"jpeg").unwrap();
+
+        let body = r##"{"v":1,"target":{"scheme":"mpd-album","value":"ArtZ|AlbZ"}}"##;
+        let r = resolve_artwork(&[dir.path().to_path_buf()], None, body.as_bytes()).unwrap();
+        assert_eq!(r.status, ResponseStatus::Ok);
+        assert!(r.path.as_ref().unwrap().ends_with("folder.jpg"));
+        assert_eq!(r.mime.as_deref(), Some("image/jpeg"));
     }
 }

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/evo-volumio-library",
     "plugins/com.volumio.playback.mpd",
     "plugins/com.volumio.artwork.local",
     "plugins/com.volumio.metadata.local",
@@ -13,6 +14,7 @@ members = [
 #   Later milestones: the remaining plugins per the volumio-evo-concept.md mapping.
 #
 # Plugin crates live under plugins/ and are added to the members array.
+#   Shared (non-plugin) code: `crates/evo-volumio-library` (e.g. `mpd-album` key scan on disk).
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,21 @@
+[package]
+name = "evo-volumio-library"
+# Internal helper for local plugins: shared MPD `mpd-album` resolution over `[library] roots`.
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Local library path + mpd-album key matching for evo-device-volumio plugins"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+lofty = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

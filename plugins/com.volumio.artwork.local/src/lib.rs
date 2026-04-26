@@ -21,8 +21,12 @@
 //!   [`config::PluginConfig::library_roots`] or absolute on disk). A cover
 //!   file next to the resolved audio file is chosen from a fixed name list
 //!   (`folder.jpg`, `cover.jpg`, …) in [`resolve::find_cover_beside_audio_file`].
-//! - **`mpd-album`**: returns `unsupported` until graph-backed or library
-//!   index resolution exists; callers should use `mpd-path` for now.
+//! - **`mpd-album`**: `value` is `"{artist}|{album}"` as emitted by
+//!   `com.volumio.playback.mpd` for the `album` subject. The respondent scans
+//!   files under [library] roots and picks the **first** track (deterministic
+//!   walk) whose primary tag artist and album match; it then uses the same
+//!   cover logic as `mpd-path` for that file. Large libraries are bounded (see
+//!   `evo_volumio_library::MAX_MPD_ALBUM_SCAN_CANDIDATES`).
 //!
 //! # Version alignment
 //!
