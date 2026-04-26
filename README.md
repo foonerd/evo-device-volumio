@@ -68,7 +68,7 @@ One piece replaced. Every other piece - steward, catalogue, other plugins, brand
 
 ## Status
 
-Early. Foundation is complete. Milestone 3’s MPD warden is shipped in-tree with subject assertion; Milestone 4 (album art respondent) is under way as a second workspace crate.
+Early. Foundation is complete. Milestone 3’s MPD warden and Milestone 4’s local artwork respondent are in-tree; Milestone 5 adds `com.volumio.metadata.local` on `metadata.providers` (`metadata.query`, file tags via lofty), matching the SHOWCASE line on local metadata plus artwork.
 
 **Landed**
 
@@ -89,9 +89,10 @@ Early. Foundation is complete. Milestone 3’s MPD warden is shipped in-tree wit
     -   Phase 3.3 - operator configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`) parsed via `LoadContext::config`; endpoint and timeouts overridable; validated `ConfigError` hierarchy. Landed.
     -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Landed.
 
-**In progress (Milestone 4)**
+**Landed (Milestones 4–5)**
 
--   `com.volumio.artwork.local` on `artwork.providers` (singleton `Respondent` in `evo-plugin-sdk`); request type `artwork.resolve` with **v1 JSON** and optional `/etc/evo/plugins.d/…` `[library] roots` for MPD relative paths. Sidecar cover files (`folder.jpg`, `cover.jpg`, …) beside the track; `mpd-album` addressing returns `unsupported` until graph-based resolution. Exercises the two-plugin workspace and multi-piece packaging next to the MPD warden.
+-   `com.volumio.artwork.local` on `artwork.providers`: `artwork.resolve` (v1 JSON), optional `[library] roots`, sidecar and embedded cover art, `mpd-album` → `unsupported` for now.
+-   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; reads title, artist, album, genre, track, year, and `duration_ms` from the file via lofty. Three workspace plugin crates.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 

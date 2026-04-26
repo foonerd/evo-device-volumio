@@ -70,6 +70,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "com-volumio-metadata-local"
+version = "0.1.0"
+dependencies = [
+ "evo-plugin-sdk",
+ "lofty",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "com-volumio-playback-mpd"
 version = "0.1.0"
 dependencies = [
