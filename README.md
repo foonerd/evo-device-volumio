@@ -92,7 +92,7 @@ Early. Foundation is complete. Milestone 3’s MPD warden and Milestone 4’s lo
 **Landed (Milestones 4–5)**
 
 -   `com.volumio.artwork.local` on `artwork.providers`: `artwork.resolve` (v1 JSON), optional `[library] roots`, sidecar and embedded cover art, `mpd-album` → `unsupported` for now.
--   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; reads title, artist, album, genre, track, year, and `duration_ms` from the file via lofty. Three workspace plugin crates.
+-   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; reads tags via lofty into a **rich** payload (credits, classical work/movement, Picard sort keys, dates, ISRC, MusicBrainz UUIDs, replay gain, and file / container technicals). Three workspace plugin crates.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 

@@ -13,7 +13,13 @@
 //! ```
 //!
 //! Response: `"v":1`, `status` (`ok` / `not_found` / `unsupported` /
-//! `bad_request`), optional string fields and `duration_ms` from the container.
+//! `bad_request`), and when `ok` a rich, Picard- and classical-friendly shape:
+//! flat `title` / `artist` / `album` / `year` / `disc` / `duration_ms`, plus
+//! optional nested `credits` (composer, conductor, performers, label, …),
+//! `classical` (work, movement, movement index), `sort` (TXXX sort keys),
+//! `original`, `dates` (recording / release strings), `identifiers` (ISRC,
+//! MusicBrainz UUIDs, catalog), `replay_gain`, and `file` (sample rate,
+//! bit depth, bitrates, channel mask) from the audio container.
 //!
 //! # Version alignment
 //!
