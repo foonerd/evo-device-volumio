@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "com-volumio-metadata-local"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "evo-plugin-sdk",
  "evo-volumio-library",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "evo-plugin-sdk"
-version = "0.1.9"
+version = "0.1.8"
 dependencies = [
  "base64",
  "once_cell",

@@ -30,7 +30,7 @@ What is NOT yet executable, and which milestone unlocks it:
 
 -   **A first plugin to exercise the build-sign-publish flow** - Milestone 3.
 -   **A second plugin to exercise multi-piece composition** - Milestone 4.
--   **Continuous-dev, manual-build, and promotion workflows under `.github/workflows/`** - authored alongside Milestone 3 when there is a first piece to publish.
+-   **Continuous-dev, manual-build, and promotion workflows under `.github/workflows/`** - present: `build`, `continuous-dev`, `manual-build`, and a placeholder `promote` (artefact-plane pointer move not implemented yet). Cross-build and sign-smoke are exercised; full publish to `evo-device-volumio-artefacts` is still pending the artefact manifest and token.
 -   **The artefact manifest format on the artefacts repo** - authored when the first workflow writes one.
 -   **The on-device update script `scripts/device/update.sh` (CHECK / OFFER / APPLY)** - authored when the manifest exists and pieces exist to update.
 -   **Signing tool and vendor key management** - decided when the first signature is cut.
@@ -64,9 +64,14 @@ Run by a developer on the workstation. Source under `scripts/workstation/`.
 
 ### 3.3 Workflow scripts
 
-Run by GitHub Actions on the source repo. Source under `.github/workflows/` (absent today; lands with Milestone 3).
+Run by GitHub Actions on the source repo. Source under `.github/workflows/`.
 
--   Continuous dev, manual build, promotion. Shape described in `SHOWCASE.md` section 7. The promotion workflow is a metadata-only pointer move; no rebuild.
+-   **build** — every PR and push: fmt, clippy, test, with a sibling `evo-core` clone.
+-   **continuous-dev** — on `main` with path filter: cross-compilation for `aarch64`, optional sign/verify using `PLUGIN_SIGNING_KEY_PEM` and the out-of-process `ci/oob-sign-smoke` bundle (in-process production plugins are not what `evo-plugin-tool sign` signs; see `DEVELOPING.md` GitHub Actions).
+-   **manual-build** — `workflow_dispatch` (ref + channel inputs).
+-   **promote** — pointer move only on the artefacts plane; still a placeholder until the artefacts manifest and automation land.
+
+The detailed shape is in `SHOWCASE.md` section 7. The promotion workflow, when complete, is a metadata-only pointer move; no rebuild.
 
 ### 3.4 Trust posture of the automation itself
 

@@ -1,0 +1,6 @@
+# Sidecar for vendor-plugin-signing-public.pem (see PLUGIN_PACKAGING / evo_trust::KeyMeta)
+[authorisation]
+# CI sign-smoke bundle uses com.volumio.*; production in-process plugin manifests use the same prefix
+name_prefixes = ["com.volumio.*"]
+# Covers trust classes used by in-process and out-of-process test bundles
+max_trust_class = "platform"

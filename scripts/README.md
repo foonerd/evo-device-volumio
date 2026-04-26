@@ -6,7 +6,8 @@ Three families, one per audience:
 
 -   `device/` - run on the Raspberry Pi. `bootstrap.sh` (first install), `reset.sh` (wipe), and in due course `update.sh` (CHECK / OFFER / APPLY).
 -   `workstation/` - run by a developer. `Makefile` targets wrap `cross build` for the steward and the plugin set.
--   (not in this repo) `.github/workflows/` - run by GitHub Actions. Arrive alongside the first plugin (Milestone 3), when there is a piece to publish.
+-   `scripts/ci/setup-evo-core.sh` — clones or updates a sibling [foonerd/evo-core](https://github.com/foonerd/evo-core) for GitHub Actions and for a local run with a fresh sibling tree.
+-   `.github/workflows/` — `build`, `continuous-dev`, `manual-build`, `promote` (see `DEVELOPING.md` and `BUILD.md` section 3.3).
 
 See BUILD.md section 3 for the full picture. Per-script headers document the scripts themselves.
 

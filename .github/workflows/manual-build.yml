@@ -1,0 +1,79 @@
+# Manual: cross-build, sign-smoke, optional upload — same as continuous-dev but for an arbitrary ref and a recorded channel. See SHOWCASE section 7.
+name: manual-build
+
+"on":
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch, tag, or full SHA)"
+        type: string
+        default: main
+      channel:
+        description: "Artefact channel to record in logs (dev / test / prod) — no publish yet"
+        type: choice
+        options: [dev, test, prod]
+        default: dev
+
+env:
+  EVO_CORE_TAG: v0.1.9
+  CROSS_AARCH64_TARGET: aarch64-unknown-linux-gnu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Log destination channel
+        run: |
+          echo "Building @ ${{ inputs.ref }}; intended channel: ${{ inputs.channel }} (publishing to artefacts is not wired yet)"
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: clippy, rustfmt
+      - name: Set up Docker / Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Install cross
+        run: cargo install cross --locked
+      - name: Clone evo-core
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: ./scripts/ci/setup-evo-core.sh
+      - name: Fmt, clippy, test
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Cross build (aarch64, release)
+        run: |
+          : "${EVO_CORE:?EVO_CORE must be set (see setup-evo-core)}"
+          cross build --release --target "$CROSS_AARCH64_TARGET" --workspace
+      - name: evo-plugin-tool sign + verify (OOP sign-smoke)
+        if: ${{ secrets.PLUGIN_SIGNING_KEY_PEM != '' }}
+        env:
+          PLUGIN_SIGNING_KEY_PEM: ${{ secrets.PLUGIN_SIGNING_KEY_PEM }}
+        run: |
+          set -e
+          umask 077
+          printenv PLUGIN_SIGNING_KEY_PEM > /tmp/plugin-signing.key.pem
+          P="$GITHUB_WORKSPACE"
+          T="$RUNNER_TEMP/trust-opt"
+          mkdir -p "$T" "$RUNNER_TEMP/trust-etc"
+          cp "$P/keys/vendor-plugin-signing-public.pem" "$P/keys/vendor-plugin-signing-public.meta.toml" "$T/"
+          : "${EVO_CORE:?EVO_CORE must be set}"
+          ( cd "$EVO_CORE" && cargo run -p evo-plugin-tool -- sign "$P/ci/oob-sign-smoke" --key /tmp/plugin-signing.key.pem )
+          ( cd "$EVO_CORE" && cargo run -p evo-plugin-tool -- \
+              verify "$P/ci/oob-sign-smoke" --trust-dir-opt "$T" --trust-dir-etc "$RUNNER_TEMP/trust-etc" \
+              --revocations /tmp/evo-revocations-not-present.toml )
+      - name: Upload OOP sign-smoke bundle
+        if: ${{ success() && secrets.PLUGIN_SIGNING_KEY_PEM != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: oob-sign-smoke-manual-${{ inputs.channel }}-${{ inputs.ref }}
+          path: |
+            ci/oob-sign-smoke/manifest.toml
+            ci/oob-sign-smoke/manifest.sig
+            ci/oob-sign-smoke/plugin.bin
+          if-no-files-found: warn
