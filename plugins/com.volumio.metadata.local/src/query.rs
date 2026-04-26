@@ -15,6 +15,8 @@ use lofty::tag::{Accessor, ItemKey, ItemValue, Tag};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::config::MetadataProfile;
+
 /// `mpd-path`: MPD's `file` (library-relative or absolute).
 pub(crate) const SCHEME_MPD_PATH: &str = "mpd-path";
 /// `mpd-album`: `Artist|Album` — first matching track under [library] roots (tag scan via `evo_volumio_library`).
@@ -45,6 +47,10 @@ pub(crate) struct MetadataQueryResponse {
     status: ResponseStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    /// On `status: ok`, the operator `metadata` profile that filtered this payload
+    /// (`[metadata] profile` in the plugin TOML).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_profile: Option<String>,
 
     // —— common flat fields (backward compatible) ——
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,6 +306,7 @@ impl MetadataQueryResponse {
             v: 1,
             status,
             detail,
+            active_profile: None,
             title: None,
             artist: None,
             album: None,
@@ -645,6 +652,7 @@ fn ok_response(
         v: 1,
         status: ResponseStatus::Ok,
         detail: extra_detail,
+        active_profile: None,
         title: opt_cow(tag.title()),
         artist: opt_cow(tag.artist()),
         album: opt_cow(tag.album()),
@@ -703,7 +711,9 @@ pub(crate) fn build_ok_response(
     file_props: &FileProperties,
     extra_detail: Option<String>,
 ) -> MetadataQueryResponse {
-    ok_response(tag, file_props, extra_detail)
+    let mut r = ok_response(tag, file_props, extra_detail);
+    apply_metadata_profile(&mut r, MetadataProfile::Extended);
+    r
 }
 
 /// Test / harness helper: synthetic [`FileProperties`] with `duration_ms` only.
@@ -722,23 +732,55 @@ pub(crate) fn response_from_tag(
         None,
         None,
     );
-    ok_response(tag, &p, detail)
+    let mut r = ok_response(tag, &p, detail);
+    apply_metadata_profile(&mut r, MetadataProfile::Extended);
+    r
 }
 
-/// Read tags and duration with lofty.
-fn read_file_metadata(path: &Path) -> Result<MetadataQueryResponse, String> {
+/// Read tags and duration with lofty, then apply [`MetadataProfile`].
+fn read_file_metadata(
+    path: &Path,
+    profile: MetadataProfile,
+) -> Result<MetadataQueryResponse, String> {
     let tagged = read_from_path(path).map_err(|e| format!("read audio file: {e}"))?;
     let props: &FileProperties = tagged.properties();
     if let Some(t) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-        return Ok(ok_response(t, props, None));
+        let mut r = ok_response(t, props, None);
+        apply_metadata_profile(&mut r, profile);
+        return Ok(r);
     }
-    Ok(ok_from_properties_only(props))
+    let mut m = ok_from_properties_only(props);
+    apply_metadata_profile(&mut m, profile);
+    Ok(m)
+}
+
+/// Strips fields not present in the operator’s [`MetadataProfile`]. For `ok` responses, sets
+/// `active_profile` to the effective profile wire string.
+pub(crate) fn apply_metadata_profile(r: &mut MetadataQueryResponse, profile: MetadataProfile) {
+    if r.status != ResponseStatus::Ok {
+        return;
+    }
+    r.active_profile = Some(profile.as_wire().to_string());
+    if profile == MetadataProfile::Extended {
+        return;
+    }
+    r.sort = None;
+    r.credits = None;
+    r.classical = None;
+    r.original = None;
+    r.dates = None;
+    r.identifiers = None;
+    r.replay_gain = None;
+    r.file = None;
+    r.extras = None;
+    r.lyrics = None;
 }
 
 // ---- request handling ------------------------------------------------------
 
 /// Handle a `metadata.query` payload: parse JSON, resolve `mpd-path` or `mpd-album`, read tags.
 pub(crate) fn query_metadata(
+    profile: MetadataProfile,
     library_roots: &[PathBuf],
     payload: &[u8],
 ) -> Result<MetadataQueryResponse, String> {
@@ -824,7 +866,7 @@ pub(crate) fn query_metadata(
                     ),
                 ));
             };
-            let mut r = read_file_metadata(&path).unwrap_or_else(|e| {
+            let mut r = read_file_metadata(&path, profile).unwrap_or_else(|e| {
                 MetadataQueryResponse::v1_error(ResponseStatus::NotFound, Some(e))
             });
             if r.status == ResponseStatus::Ok {
@@ -848,7 +890,7 @@ pub(crate) fn query_metadata(
                     Some("audio file not found for mpd_path".to_string()),
                 ));
             };
-            let r = read_file_metadata(&path).unwrap_or_else(|e| {
+            let r = read_file_metadata(&path, profile).unwrap_or_else(|e| {
                 MetadataQueryResponse::v1_error(ResponseStatus::NotFound, Some(e))
             });
             Ok(r)
@@ -889,6 +931,7 @@ fn resolve_audio_path(library_roots: &[PathBuf], value: &str) -> Option<PathBuf>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MetadataProfile;
     use lofty::tag::Tag;
     use lofty::tag::TagType;
 
@@ -933,11 +976,25 @@ mod tests {
     #[test]
     fn not_found_for_http_url() {
         let r = query_metadata(
+            MetadataProfile::default(),
             &[],
             r#"{"v":1,"target":{"scheme":"mpd-path","value":"http://x/a.flac"}}"#.as_bytes(),
         )
         .unwrap();
         assert_eq!(r.status, ResponseStatus::NotFound);
+    }
+
+    #[test]
+    fn standard_profile_strips_nested_and_sets_active_profile() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        assert!(tag.insert_text(ItemKey::Composer, "C".to_string(),));
+        let mut r = response_from_tag(&tag, 0, None);
+        assert!(r.credits.is_some());
+        apply_metadata_profile(&mut r, MetadataProfile::Standard);
+        assert_eq!(r.active_profile.as_deref(), Some("standard"));
+        assert!(r.credits.is_none());
+        assert!(r.classical.is_none());
+        assert!(r.extras.is_none());
     }
 
     #[test]
@@ -978,9 +1035,15 @@ mod tests {
         tag.save_to_path(&mp3, WriteOptions::new().preferred_padding(0))
             .expect("tag save");
         let body = r##"{"v":1,"target":{"scheme":"mpd-album","value":"ScanA|ScanB"}}"##;
-        let r = query_metadata(&[dir.path().to_path_buf()], body.as_bytes()).unwrap();
+        let r = query_metadata(
+            MetadataProfile::Extended,
+            &[dir.path().to_path_buf()],
+            body.as_bytes(),
+        )
+        .unwrap();
         assert_eq!(r.status, ResponseStatus::Ok);
         assert_eq!(r.title.as_deref(), Some("T1"));
+        assert_eq!(r.active_profile.as_deref(), Some("extended"));
         assert!(r.detail.as_deref().unwrap_or("").contains("mpd-album"));
     }
 }

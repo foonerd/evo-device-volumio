@@ -23,7 +23,8 @@ class = "standard"
 evo_min_version = "0.1.9"
 os_family = "linux"
 outbound_network = false
-# Optional [library] in com.volumio.metadata.local.toml — same as artwork (MPD file paths).
+# Optional in com.volumio.metadata.local.toml: [library] roots (MPD file paths, same as artwork);
+# [metadata] profile = "standard" | "extended" (default standard) — see plugin docs/METADATA_QUERY_V1.md.
 filesystem_scopes = []
 
 [resources]

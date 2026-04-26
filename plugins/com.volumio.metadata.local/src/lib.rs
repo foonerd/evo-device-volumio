@@ -3,7 +3,9 @@
 //! **`metadata.providers`** singleton respondent. Answers `metadata.query` with
 //! v1 JSON by reading embedded tags (via [`lofty`]) from local audio files,
 //! using the same `mpd-path` / `mpd-album` addressing and `[library] roots` as
-//! `com.volumio.artwork.local` and `com.volumio.playback.mpd`.
+//! `com.volumio.artwork.local` and `com.volumio.playback.mpd`, and optional
+//! `[metadata] profile` (`standard` default, `extended` for full tags / technicals; see
+//! `docs/METADATA_QUERY_V1.md`).
 //!
 //! # `metadata.query` (JSON, UTF-8)
 //!
@@ -146,6 +148,11 @@ impl Plugin for MetadataLocalPlugin {
                     "library search roots configured"
                 );
             }
+            tracing::info!(
+                plugin = PLUGIN_NAME,
+                profile = self.config.metadata_profile.as_wire(),
+                "metadata response profile (metadata.query)"
+            );
             self.loaded = true;
             Ok(())
         }
@@ -204,7 +211,11 @@ impl Respondent for MetadataLocalPlugin {
                 "metadata.query"
             );
 
-            let out = match query::query_metadata(&self.config.library_roots, &req.payload) {
+            let out = match query::query_metadata(
+                self.config.metadata_profile,
+                &self.config.library_roots,
+                &req.payload,
+            ) {
                 Ok(r) => r,
                 Err(e) => {
                     return Err(PluginError::Permanent(e));

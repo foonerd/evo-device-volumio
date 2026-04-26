@@ -92,7 +92,7 @@ Early. Foundation is complete. Milestone 3’s MPD warden and Milestone 4’s lo
 **Landed (Milestones 4–5)**
 
 -   `com.volumio.artwork.local` on `artwork.providers`: `artwork.resolve` (v1 JSON), optional `[library] roots`, sidecar and embedded cover art, `mpd-album` → first matching track under roots then same cover path as `mpd-path` (see `crates/evo-volumio-library`). Shared with metadata for tag scan / `Artist|Album` parse.
--   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; reads tags via lofty into a **rich** payload (credits, classical work/movement, Picard sort keys, dates, ISRC, MusicBrainz UUIDs, replay gain, file / container technicals, and `extras` for unmapped frames). **Schema:** [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md). Three workspace plugin crates.
+-   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; operator **`[metadata] profile`** chooses **`standard`** (default, lean) vs **`extended`** (full tags, technicals, `extras`). **Schema and profile tables:** [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md). Three workspace plugin crates.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 

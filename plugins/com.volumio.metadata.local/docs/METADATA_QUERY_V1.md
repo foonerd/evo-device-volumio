@@ -8,6 +8,53 @@ This document is the **authoritative field catalogue** for the success and error
 
 ---
 
+## Metadata profiles (operator config)
+
+The **request** JSON does not select a profile. The operator sets a single global mode in the plugin config file (same path pattern as other plugins, e.g. `/etc/evo/plugins.d/com.volumio.metadata.local.toml`).
+
+```toml
+[metadata]
+# Optional. Default: "standard" (case-insensitive).
+profile = "standard"
+# profile = "extended"
+```
+
+| Profile   | Purpose | Success response |
+|-----------|---------|------------------|
+| `standard` | Default. Small payloads for typical UIs: core flat tag fields and top-level `duration_ms`, without large or specialist blocks. | Omits nested groups, `lyrics`, technical `file`, and unmapped `extras`. |
+| `extended` | Full readout for cataloguing, classical/jazz credits, MusicBrainz IDs, replay gain, container bitrates, and vendor `TXXX` / unknown frames. | All fields the file supports, subject to size caps (e.g. lyrics). |
+
+### What each profile includes (`status: "ok"`)
+
+| Area | `standard` | `extended` |
+|------|------------|------------|
+| Top-level `v`, `status`, `detail` | yes | yes |
+| `active_profile` | yes (`"standard"`) | yes (`"extended"`) |
+| Flat tag fields: `title`, `artist`, `album`, `album_artist`, `artists`, `genre`, `track` / `track_total`, `disc` / `disc_total`, `year`, `duration_ms` | yes | yes |
+| `subtitle`, `language`, `script`, `comment`, `mood`, `initial_key`, `bpm` | yes | yes |
+| `compilation`, `podcast` | yes | yes |
+| `lyrics` | **no** | yes (capped) |
+| `sort` | **no** | yes |
+| `credits` | **no** | yes |
+| `classical` | **no** | yes |
+| `original` | **no** | yes |
+| `dates` | **no** | yes |
+| `identifiers` (ISRC, MusicBrainz, …) | **no** | yes |
+| `replay_gain` | **no** | yes |
+| `file` (sample rate, bit depth, bitrates, …) | **no** | yes |
+| `extras` (unmapped / vendor frames) | **no** | yes |
+
+### How to switch profile (for a UI or operator tool)
+
+1. **Read** the effective mode from successful `metadata.query` responses: field `active_profile` is `"standard"` or `"extended"`. Error responses do not include it.
+2. **Change** the mode by editing the plugin TOML: set `[metadata] profile` to the desired value and save the file.
+3. **Apply** the new config: reload the plugin or restart the component that calls `Plugin::load` with `LoadContext::config` (your distribution documents the exact action; often a service restart or plugin hot-reload if supported).
+4. **Re-fetch** metadata; new responses use the updated profile. The UI can refresh when it detects a config change or on next query.
+
+There is no per-request override in v1; a future request version could add one.
+
+---
+
 ## Request (v1)
 
 | Field   | Type   | Required | Description |
@@ -38,6 +85,7 @@ This document is the **authoritative field catalogue** for the success and error
 | `v`       | number | Always `1`. |
 | `status`  | string | `ok` · `not_found` · `unsupported` · `bad_request` |
 | `detail`  | string? | Human-readable reason (errors; optional on `ok`). |
+| `active_profile` | string? | On **`ok` only:** `"standard"` or `"extended"` — mirrors operator `[metadata] profile` after filtering. |
 
 On non-`ok` outcomes, only `v`, `status`, and usually `detail` are set; all other fields are absent.
 
@@ -66,13 +114,15 @@ On non-`ok` outcomes, only `v`, `status`, and usually `detail` are set; all othe
 | `mood`           | string?     | |
 | `initial_key`    | string?     | Musical key. |
 | `bpm`            | string?     | As in file (integer or decimal string). |
-| `lyrics`         | string?     | Unsynchronised lyrics; **capped** at 512_000 bytes (UTF-8). |
+| `lyrics`         | string?     | Unsynchronised lyrics; **capped** at 512_000 bytes (UTF-8). **`extended` profile only** (omitted in `standard`). |
 | `compilation`    | bool?       | When tag encodes a compilation flag. |
 | `podcast`        | bool?       | When present in tags. |
 
 ---
 
 ## `status: "ok"` — nested objects
+
+**Present only when `active_profile` is `"extended"`** (omitted entirely under `standard`).
 
 Omitted if every field inside would be null.
 
@@ -197,6 +247,7 @@ Known first-class `ItemKey` values are **not** duplicated in `extras`; they appe
 {
   "v": 1,
   "status": "ok",
+  "active_profile": "extended",
   "title": "Gigue",
   "artist": "Arthur Grumiaux",
   "album_artist": "Grumiaux, Arthur",
