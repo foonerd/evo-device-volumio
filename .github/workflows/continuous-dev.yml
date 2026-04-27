@@ -47,36 +47,11 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --all-targets -- -D warnings
           cargo test --workspace
-      - name: Cross build plugins (aarch64, release)
+      - name: Cross build plugins (aarch64, release) when workspace has plugin members
         run: |
           : "${EVO_CORE:?EVO_CORE must be set (see setup-evo-core)}"
-          cross build --release --target "$CROSS_AARCH64_TARGET" --workspace
-      - name: evo-plugin-tool sign + verify (OOP sign-smoke, PKCS#8 in PLUGIN_SIGNING_KEY_PEM)
-        if: ${{ secrets.PLUGIN_SIGNING_KEY_PEM != '' }}
-        env:
-          PLUGIN_SIGNING_KEY_PEM: ${{ secrets.PLUGIN_SIGNING_KEY_PEM }}
-        run: |
-          set -e
-          umask 077
-          printenv PLUGIN_SIGNING_KEY_PEM > /tmp/plugin-signing.key.pem
-          P="$GITHUB_WORKSPACE"
-          T="$RUNNER_TEMP/trust-opt"
-          mkdir -p "$T" "$RUNNER_TEMP/trust-etc"
-          cp "$P/keys/vendor-plugin-signing-public.pem" "$P/keys/vendor-plugin-signing-public.meta.toml" "$T/"
-          : "${EVO_CORE:?EVO_CORE must be set}"
-          ( cd "$EVO_CORE" && cargo run -p evo-plugin-tool -- \
-              lint "$P/ci/oob-sign-smoke" )
-          ( cd "$EVO_CORE" && cargo run -p evo-plugin-tool -- \
-              sign "$P/ci/oob-sign-smoke" --key /tmp/plugin-signing.key.pem )
-          ( cd "$EVO_CORE" && cargo run -p evo-plugin-tool -- \
-              verify "$P/ci/oob-sign-smoke" --trust-dir-opt "$T" --trust-dir-etc "$RUNNER_TEMP/trust-etc" \
-              --revocations /tmp/evo-revocations-not-present.toml )
-      - name: Upload OOP sign-smoke bundle
-        if: ${{ success() && secrets.PLUGIN_SIGNING_KEY_PEM != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: oob-sign-smoke
-          path: |
-            ci/oob-sign-smoke/manifest.toml
-            ci/oob-sign-smoke/manifest.sig
-            ci/oob-sign-smoke/plugin.bin
+          if [ -d plugins ] && [ -n "$(ls -A plugins 2>/dev/null | grep -v '^\.gitkeep$' || true)" ]; then
+            cross build --release --target "$CROSS_AARCH64_TARGET" --workspace
+          else
+            echo "No plugin crates to cross-build; skipping (brand-neutral plugins migrated to evo-plugins-audio per ADR-0026; first vendor-specific plugin pending)."
+          fi
