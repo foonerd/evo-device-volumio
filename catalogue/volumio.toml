@@ -54,6 +54,11 @@ shape = 1
 description = "Optional transformation stages between source and delivery."
 
 [[racks.shelves]]
+name = "composition"
+shape = 1
+description = "Composition stage: derives a delivery configuration projection from contributing modules (e.g. an ALSA pipeline composed from resampler/EQ snippets). Feeds the delivery shelf via the steward's compose-and-apply reconciliation when that lands; today the projection can be applied manually."
+
+[[racks.shelves]]
 name = "delivery"
 shape = 1
 description = "The output stage delivering decoded audio to hardware."
