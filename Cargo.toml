@@ -1,20 +1,17 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/evo-volumio-library",
-    "plugins/com.volumio.playback.mpd",
-    "plugins/com.volumio.artwork.local",
-    "plugins/com.volumio.metadata.local",
-]
+members = ["crates/evo-device-volumio-shared"]
 
-# Workspace members are added as milestones land:
-#   Milestone 3: com.volumio.playback.mpd (MPD playback warden).
-#   Milestone 4: com.volumio.artwork.local (album-art respondent).
-#   Milestone 5: com.volumio.metadata.local (file-tag metadata respondent).
-#   Later milestones: the remaining plugins per the volumio-evo-concept.md mapping.
+# Brand-neutral audio plugins (MPD, ALSA, file-tag metadata,
+# local artwork, etc.) live in evo-plugins-audio under
+# org.evoframework.* and are admitted by this distribution's
+# catalogue. Volumio-specific plugin crates land under
+# plugins/<full.dotted.name>/ and are added to the members
+# array as they arrive (first planned candidate: a
+# Volumio-specific metadata pipeline integration).
 #
-# Plugin crates live under plugins/ and are added to the members array.
-#   Shared (non-plugin) code: `crates/evo-volumio-library` (e.g. `mpd-album` key scan on disk).
+# Workspace anchor and home for non-plugin Volumio-specific
+# code: crates/evo-device-volumio-shared.
 
 [workspace.package]
 version = "0.1.0"

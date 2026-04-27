@@ -1,0 +1,15 @@
+[package]
+name = "evo-device-volumio-shared"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Workspace anchor and home for utilities specific to evo-device-volumio. Internal; not a published artefact."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
