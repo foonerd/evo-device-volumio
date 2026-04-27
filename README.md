@@ -68,31 +68,28 @@ One piece replaced. Every other piece - steward, catalogue, other plugins, brand
 
 ## Status
 
-Early. Foundation is complete. Milestone 3’s MPD warden and Milestone 4’s local artwork respondent are in-tree; Milestone 5 adds `com.volumio.metadata.local` on `metadata.providers` (`metadata.query`, file tags via lofty), matching the SHOWCASE line on local metadata plus artwork.
+Foundation complete. The three brand-neutral plugins that lived here through Milestones 3-5 (MPD playback warden, local file-tag metadata respondent, local album-artwork respondent) migrated to [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) and are admitted by this distribution under the `org.evoframework.*` namespace. None encoded Volumio-specific behaviour; lifting them to the commons tier is their right home.
 
 **Landed**
 
 -   Milestone 0 - distribution-process showcase ([SHOWCASE.md](SHOWCASE.md)).
 -   Milestone 1 - repository scaffolding (Cargo workspace, licence, docs, placeholder directories).
 -   Milestone 2 - `catalogue/volumio.toml` declaring 15 racks, 26 shelves, and the track-album relation predicates.
+-   Plugin-tier migration - brand-neutral plugins moved to [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio); the commons signing key is bundled in `keys/`.
 -   [BUILD.md](BUILD.md) - executable runbook, companion to SHOWCASE.
 -   `scripts/` - automation skeleton. `bootstrap.sh` (skeleton that completes as later milestones land), `reset.sh` (fully working today), workstation `Makefile` for cross-compiles.
 
-**In progress**
+**Consumed from evo-plugins-audio**
 
--   Milestone 3 - `com.volumio.playback.mpd` stocking `audio.playback` (first plugin, first real release). Infrastructure layers landing in sequence:
-    -   Phase 3.0 - crate skeleton, manifest, stub warden. Landed.
-    -   Phase 3.1 - MPD connection layer (protocol stack, status, currentsong). Landed.
-    -   Phase 3.2a - transport commands + idle subprotocol on the connection layer. Landed.
-    -   Phase 3.2b - playback supervisor module (two-task actor with bounded reconnection and TOML state reports). Landed.
-    -   Phase 3.2c - supervisor wired into the warden trait impls; course-correction payload encoding and `PlaybackError` -> `PluginError` classification in place; lint suppressions retired. Landed.
-    -   Phase 3.3 - operator configuration file (`/etc/evo/plugins.d/com.volumio.playback.mpd.toml`) parsed via `LoadContext::config`; endpoint and timeouts overridable; validated `ConfigError` hierarchy. Landed.
-    -   Phase 3.4 - subject assertion (`track` + `album` for Milestone 4's respondent to walk). Landed.
+| Plugin | Slot | Source |
+|--------|------|--------|
+| `org.evoframework.playback.mpd` | `audio.playback` | [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) |
+| `org.evoframework.metadata.local` | `metadata.providers` | [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) |
+| `org.evoframework.artwork.local` | `artwork.providers` | [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) |
 
-**Landed (Milestones 4–5)**
+**Next**
 
--   `com.volumio.artwork.local` on `artwork.providers`: `artwork.resolve` (v1 JSON), optional `[library] roots`, sidecar and embedded cover art, `mpd-album` → first matching track under roots then same cover path as `mpd-path` (see `crates/evo-volumio-library`). Shared with metadata for tag scan / `Artist|Album` parse.
--   `com.volumio.metadata.local` on `metadata.providers`: `metadata.query` (v1 JSON) with the same `mpd-path` / `mpd-album` target shape; operator **`[metadata] profile`** chooses **`standard`** (default, lean) vs **`extended`** (full tags, technicals, `extras`). **Schema and profile tables:** [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md). Three workspace plugin crates.
+The first genuinely Volumio-specific plugin lands in this repository. Current candidate: a metadata plugin that integrates with Volumio’s existing metadata pipeline.
 
 `evo-core` is pinned at tag `v0.1.9` via `[workspace.dependencies]` in `Cargo.toml`. Bumps are deliberate; see [DEVELOPING.md](DEVELOPING.md) for the procedure.
 
@@ -110,6 +107,7 @@ Early. Foundation is complete. Milestone 3’s MPD warden and Milestone 4’s lo
 ## Related
 
 -   [foonerd/evo-core](https://github.com/foonerd/evo-core) - the framework.
+-   [foonerd/evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) - brand-neutral audio plugin commons; consumed by this distribution.
 -   [foonerd/evo-device-volumio-artefacts](https://github.com/foonerd/evo-device-volumio-artefacts) - the release plane for this distribution.
 
 ## License

@@ -47,12 +47,9 @@ Source under [`.github/workflows/`](.github/workflows/); see [SHOWCASE.md](SHOWC
 
 **Repository secret** `PLUGIN_SIGNING_KEY_PEM` (optional for green CI): PKCS#8 PEM for the **private** key that pairs with the public key in [`keys/vendor-plugin-signing-public.pem`](keys/vendor-plugin-signing-public.pem) and its [`keys/vendor-plugin-signing-public.meta.toml`](keys/vendor-plugin-signing-public.meta.toml) sidecar. When set, the continuous-dev and manual-build workflows sign and verify the out-of-process bundle in [`ci/oob-sign-smoke/`](ci/oob-sign-smoke/) only. That exercise exists because [evo-plugin-tool](https://github.com/foonerd/evo-core) `sign` / `verify` require an on-disk out-of-process artefact; the production Volumio plugins in this repository are **in-process** (`exec = "<compiled-in>"` in their manifests) and are not what `evo-plugin-tool sign` signs today.
 
-## Plugin operator TOML (in-tree reference)
+## Plugin operator TOML
 
-Plugins receive `LoadContext::config` from per-plugin TOML (convention: `/etc/evo/plugins.d/<plugin name>.toml` on a device). For the stock local respondents in this repo:
-
--   **`com.volumio.metadata.local`** — optional `[library]` with `roots` / `root` (absolute paths) so `mpd-path` and `mpd-album` resolve under your music tree; optional `[metadata] profile` = `standard` (default) or `extended` to control `metadata.query` payload size. **Full wire schema and profile field matrix:** [plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md](plugins/com.volumio.metadata.local/docs/METADATA_QUERY_V1.md).
--   **`com.volumio.artwork.local`** — same `[library]` idea for `artwork.resolve`; see that crate’s `manifest.toml` and `src/config.rs`.
+Plugins receive `LoadContext::config` from per-plugin TOML (convention: `/etc/evo/plugins.d/<plugin name>.toml` on a device). The brand-neutral plugins this distribution admits (`org.evoframework.playback.mpd`, `org.evoframework.metadata.local`, `org.evoframework.artwork.local`) document their config schemas in [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio); see each plugin's `manifest.toml` prerequisites and the per-plugin docs in that repository.
 
 Re-read after edit depends on the plugin manifest `lifecycle.hot_reload` and the steward; a service restart is always a safe fallback.
 
@@ -81,24 +78,22 @@ For development runs, expect `allow_unsigned = true` in a local `evo.toml`. Prod
 
 ## Boundary discipline
 
-This repository holds everything Volumio-specific:
+Three repository tiers, three homes:
+
+This repository holds material specific to the **Volumio brand**:
 
 -   The `volumio.toml` catalogue.
--   Every plugin crate (MPD, album art, networking, storage, kiosk, metadata, branding, and so on).
--   Trust roots and signing keys for the `com.volumio.*` namespace.
+-   Volumio-specific plugin crates under `plugins/<full.dotted.name>/` (the first planned candidate is a Volumio-specific metadata pipeline integration).
+-   Trust roots: `vendor-plugin-signing-public.pem` (`com.volumio.*` namespace) and `commons-plugin-signing-public.pem` (bundled so the catalogue can admit `org.evoframework.*` plugins from the commons).
 -   Distribution packaging (Debian Trixie layer install/uninstall scripts).
--   Frontend and bridges, if and when a web UI or HTTP bridge is written as part of this distribution.
+-   Frontend and bridges, if and when a web UI or HTTP bridge is written.
 -   Branding assets.
 
-It does not hold:
+[evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) holds **brand-neutral audio plugins** (MPD playback, ALSA delivery, NetworkManager, Samba, file-tag metadata, local artwork, etc.) under the `org.evoframework.*` namespace. This distribution admits them by name; it does not duplicate them.
 
--   The steward.
--   The plugin SDK.
--   The catalogue loader and validator.
--   Generic engineering-layer contracts (manifest schema, wire protocol, client socket protocol).
--   Anything that names a specific service, piece of hardware, or protocol outside a plugin.
+[evo-core](https://github.com/foonerd/evo-core) holds the **framework**: steward, SDK, engineering-layer contracts. This repository pins evo-core via `[workspace.dependencies]`; it does not modify the framework.
 
-If a change here seems to require modifying evo-core, re-read evo-core `docs/engineering/BOUNDARY.md` section 5. The usual answer is "it goes in a plugin here, and the contract it speaks is already declared in evo-core". If you genuinely find an evo-core gap, open an issue on `foonerd/evo-core` rather than patching around it here.
+If a change here seems to require modifying evo-core, re-read evo-core's `docs/engineering/BOUNDARY.md` section 5. If a change is brand-neutral and would be useful to other audio distributions, the right home is evo-plugins-audio, not here. If you find a genuine evo-core gap, open an issue on `foonerd/evo-core`.
 
 ## Upgrading the evo-core pin
 
