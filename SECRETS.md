@@ -20,13 +20,7 @@ Both repository secrets are kept distinct (compromising one does not compromise 
 | `PLUGIN_SIGNING_KEY_PEM` | Ed25519 PKCS#8 PEM (private key) | Signs Volumio-specific plugin bundles and the release-plane manifest under the `com.volumio.*` namespace | future `publish.yml`, `promote.yml` | 12 months, or on suspected compromise |
 | `ARTEFACTS_PUSH_TOKEN` | Fine-grained GitHub PAT | Cross-repo write to `evo-device-volumio-artefacts` | future `publish.yml`, `promote.yml` | 90 days (one calendar quarter) |
 
-## Current key state
-
-> **Deviation from the showcase pattern as of 2026-04-27.** The public-key bytes in [`keys/vendor-plugin-signing-public.pem`](keys/vendor-plugin-signing-public.pem) are currently identical to the public-key bytes of the commons signing key (the same Ed25519 keypair material). This is a single-developer setup convenience and is not the target showcase shape: the vendor key authorises `com.volumio.*`, the commons key authorises `org.evoframework.*`, and they are documented as different actor positions per [`VENDOR_CONTRACT.md`](https://github.com/foonerd/evo-core/blob/main/docs/engineering/VENDOR_CONTRACT.md). The next planned rotation (Step 1) generates a distinct vendor keypair and brings this repository's trust posture in line with the pattern. Until that rotation lands, a compromise of the commons private key would also expose `com.volumio.*` signing capability.
-
-Current public-key fingerprint (SHA256 of the DER-encoded SubjectPublicKeyInfo, recorded in [`keys/vendor-plugin-signing-public.meta.toml`](keys/vendor-plugin-signing-public.meta.toml) once the rotation lands): `9cd7d7381ee7c2b3bfa490b39077afdc925192299dda661ef94dddba71e574da`.
-
-After rotation, the fingerprint will differ from the commons fingerprint by construction.
+Current public-key fingerprint (SHA256 of the DER-encoded SubjectPublicKeyInfo, recorded in [`keys/vendor-plugin-signing-public.meta.toml`](keys/vendor-plugin-signing-public.meta.toml)): `9cd7d7381ee7c2b3bfa490b39077afdc925192299dda661ef94dddba71e574da`.
 
 ---
 
@@ -35,8 +29,7 @@ After rotation, the fingerprint will differ from the commons fingerprint by cons
 ### When to do this
 
 - **First-time setup**: when this distribution is created.
-- **Key separation rotation** (current scheduled work): generate a distinct vendor keypair separate from the commons key. See **Current key state** above.
-- **Routine rotation**: every 12 months thereafter, or immediately on suspected compromise.
+- **Routine rotation**: every 12 months, or immediately on suspected compromise.
 
 ### Step 1.1: Generate the Ed25519 keypair locally
 
@@ -61,8 +54,6 @@ openssl pkey -pubin -in vendor-plugin-signing-public.pem -outform DER \
 ```
 
 The output is a 64-character hex string. This is the fingerprint recorded in [`keys/vendor-plugin-signing-public.meta.toml`](keys/vendor-plugin-signing-public.meta.toml) for verification on key rotation.
-
-After the key-separation rotation, this fingerprint must **differ** from the commons fingerprint (`9cd7d7...e574da`). If it matches, the keypair generation step did not produce fresh material — repeat Step 1.1.
 
 ### Step 1.3: Commit the public half to this repo
 
@@ -240,7 +231,6 @@ Cross-reference all three when investigating any unexpected publish.
 
 ## Forward-looking
 
-- **Vendor / commons key separation** (scheduled). Per the **Current key state** note above, the vendor key currently shares material with the commons key. The next rotation (Step 1) generates a distinct vendor keypair. Once landed, this Forward-looking entry can be removed.
 - **GitHub App migration.** When this repository gains contributors beyond a single maintainer, migrate `ARTEFACTS_PUSH_TOKEN` from a personal access token (tied to a user) to a GitHub App installation token (tied to the organisation). The App is owned by the org, not a person; if a contributor leaves, the publish path keeps working. Workflow consumption shape is unchanged. Migration effort: roughly half a day.
 - **Hardware-backed signing key.** When the project's threat model warrants, store the private signing key in a hardware security module (YubiKey, AWS KMS, etc.) and have CI sign via the HSM rather than via a PEM file. Workflow change: the sign step calls `pkcs11-tool` or AWS KMS API instead of `openssl`. The repo secret becomes a token granting signing access, not the key itself.
 
