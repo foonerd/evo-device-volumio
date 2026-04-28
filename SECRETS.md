@@ -9,7 +9,7 @@ This document covers two distinct kinds of credential material:
 1. **Volumio vendor signing key.** Ed25519 keypair. The **public half** is committed in this repo at [`keys/vendor-plugin-signing-public.pem`](keys/vendor-plugin-signing-public.pem) and is read by every device that verifies plugins published under this distribution's `com.volumio.*` namespace. The **private half** lives only in the GitHub Actions repository secret `PLUGIN_SIGNING_KEY_PEM` and never leaves the runner.
 2. **Artefacts-push token.** Fine-grained GitHub Personal Access Token. Stored as the repository secret `ARTEFACTS_PUSH_TOKEN`. Used by `publish.yml` and `promote.yml` workflows to push signed bytes from this repository's CI into [evo-device-volumio-artefacts](https://github.com/foonerd/evo-device-volumio-artefacts) (the workflows themselves land when the release-plane contract lands in evo-core).
 
-This repository also bundles the [commons signing key public half](keys/commons-plugin-signing-public.pem) so the catalogue can admit `org.evoframework.*` plugins from [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio). The commons **private** key is **not** held by this distribution; it lives only in the commons repository's secrets. This distribution signs only `com.volumio.*` artefacts; the commons signs only `org.evoframework.*` artefacts.
+This repository also bundles the [commons signing key public half](keys/commons-plugin-signing-public.pem) so the catalogue can admit `org.evoframework.*` plugins from [evo-device-audio](https://github.com/foonerd/evo-device-audio). The commons **private** key is **not** held by this distribution; it lives only in the commons repository's secrets. This distribution signs only `com.volumio.*` artefacts; the commons signs only `org.evoframework.*` artefacts.
 
 Both repository secrets are kept distinct (compromising one does not compromise the other; defence in depth) and rotated independently.
 
@@ -74,7 +74,7 @@ Update [`keys/vendor-plugin-signing-public.meta.toml`](keys/vendor-plugin-signin
 
 GitHub never shows the secret again after this; it can only be replaced.
 
-The commons private key is **not** stored on this repository. It lives only on `evo-plugins-audio`'s repo secrets. Do not paste it here.
+The commons private key is **not** stored on this repository. It lives only on `evo-device-audio`'s repo secrets. Do not paste it here.
 
 ### Step 1.5: Verify
 
@@ -155,7 +155,7 @@ GH_TOKEN=<paste-the-PAT> gh api repos/foonerd/evo-device-volumio-artefacts \
 Negative test (the PAT must not have access to anything else):
 
 ```bash
-GH_TOKEN=<paste-the-PAT> gh api repos/foonerd/evo-plugins-audio-artefacts \
+GH_TOKEN=<paste-the-PAT> gh api repos/foonerd/evo-device-audio-artefacts \
     --jq '.permissions'
 # Expected: HTTP 404 (token has no access)
 ```
@@ -238,4 +238,4 @@ Cross-reference all three when investigating any unexpected publish.
 
 ## This document is a worked example
 
-Distributions creating new evo-device-* repositories copy this document with their own repo names, key namespaces, and trust contexts substituted. The two-secret model (signing key + cross-repo write token), the canonical token-name format (`<source-repo>: publish (YYYY-QN)`, kept under the GitHub 40-character limit), and the rotation cadences (12 months for signing keys, 90 days for PATs) are project-wide conventions. See [foonerd/evo-plugins-audio/SECRETS.md](https://github.com/foonerd/evo-plugins-audio/blob/main/SECRETS.md) for the parallel document at the plugin commons tier.
+Distributions creating new evo-device-* repositories copy this document with their own repo names, key namespaces, and trust contexts substituted. The two-secret model (signing key + cross-repo write token), the canonical token-name format (`<source-repo>: publish (YYYY-QN)`, kept under the GitHub 40-character limit), and the rotation cadences (12 months for signing keys, 90 days for PATs) are project-wide conventions. See [foonerd/evo-device-audio/SECRETS.md](https://github.com/foonerd/evo-device-audio/blob/main/SECRETS.md) for the parallel document at the plugin commons tier.

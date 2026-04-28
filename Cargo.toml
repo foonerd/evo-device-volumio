@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/evo-device-volumio-shared"]
 
 # Brand-neutral audio plugins (MPD, ALSA, file-tag metadata,
-# local artwork, etc.) live in evo-plugins-audio under
+# local artwork, etc.) live in evo-device-audio under
 # org.evoframework.* and are admitted by this distribution's
 # catalogue. Volumio-specific plugin crates land under
 # plugins/<full.dotted.name>/ and are added to the members

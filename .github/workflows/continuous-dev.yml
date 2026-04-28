@@ -53,5 +53,5 @@ jobs:
           if [ -d plugins ] && [ -n "$(ls -A plugins 2>/dev/null | grep -v '^\.gitkeep$' || true)" ]; then
             cross build --release --target "$CROSS_AARCH64_TARGET" --workspace
           else
-            echo "No plugin crates to cross-build; skipping (brand-neutral plugins migrated to evo-plugins-audio per ADR-0026; first vendor-specific plugin pending)."
+            echo "No plugin crates to cross-build; skipping (brand-neutral plugins migrated to evo-device-audio per ADR-0026; first vendor-specific plugin pending)."
           fi

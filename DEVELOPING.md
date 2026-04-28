@@ -49,7 +49,7 @@ Source under [`.github/workflows/`](.github/workflows/); see [SHOWCASE.md](SHOWC
 
 ## Plugin operator TOML
 
-Plugins receive `LoadContext::config` from per-plugin TOML (convention: `/etc/evo/plugins.d/<plugin name>.toml` on a device). The brand-neutral plugins this distribution admits (`org.evoframework.playback.mpd`, `org.evoframework.metadata.local`, `org.evoframework.artwork.local`) document their config schemas in [evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio); see each plugin's `manifest.toml` prerequisites and the per-plugin docs in that repository.
+Plugins receive `LoadContext::config` from per-plugin TOML (convention: `/etc/evo/plugins.d/<plugin name>.toml` on a device). The brand-neutral plugins this distribution admits (`org.evoframework.playback.mpd`, `org.evoframework.metadata.local`, `org.evoframework.artwork.local`) document their config schemas in [evo-device-audio](https://github.com/foonerd/evo-device-audio); see each plugin's `manifest.toml` prerequisites and the per-plugin docs in that repository.
 
 Re-read after edit depends on the plugin manifest `lifecycle.hot_reload` and the steward; a service restart is always a safe fallback.
 
@@ -78,22 +78,22 @@ For development runs, expect `allow_unsigned = true` in a local `evo.toml`. Prod
 
 ## Boundary discipline
 
-Three repository tiers, three homes:
+Three repository tiers per ADR-0032 (supersedes ADR-0026):
 
-This repository holds material specific to the **Volumio brand**:
+This repository is the **vendor distribution** tier. It holds material specific to the Volumio brand:
 
 -   The `volumio.toml` catalogue.
 -   Volumio-specific plugin crates under `plugins/<full.dotted.name>/` (the first planned candidate is a Volumio-specific metadata pipeline integration).
--   Trust roots: `vendor-plugin-signing-public.pem` (`com.volumio.*` namespace) and `commons-plugin-signing-public.pem` (bundled so the catalogue can admit `org.evoframework.*` plugins from the commons).
+-   Trust roots: `vendor-plugin-signing-public.pem` (`com.volumio.*` namespace) and `commons-plugin-signing-public.pem` (bundled so the catalogue can admit `org.evoframework.*` plugins from the reference generic device).
 -   Distribution packaging (Debian Trixie layer install/uninstall scripts).
 -   Frontend and bridges, if and when a web UI or HTTP bridge is written.
 -   Branding assets.
 
-[evo-plugins-audio](https://github.com/foonerd/evo-plugins-audio) holds **brand-neutral audio plugins** (MPD playback, ALSA delivery, NetworkManager, Samba, file-tag metadata, local artwork, etc.) under the `org.evoframework.*` namespace. This distribution admits them by name; it does not duplicate them.
+[evo-device-audio](https://github.com/foonerd/evo-device-audio) is the **reference generic audio device** tier. It holds brand-neutral audio plugins (MPD playback, ALSA composition, file-tag metadata, local artwork, etc.) under the `org.evoframework.*` namespace, plus the device build that links them, plus (when authored) a generic audio UI. This distribution admits the plugins by name; it does not duplicate them.
 
-[evo-core](https://github.com/foonerd/evo-core) holds the **framework**: steward, SDK, engineering-layer contracts. This repository pins evo-core via `[workspace.dependencies]`; it does not modify the framework.
+[evo-core](https://github.com/foonerd/evo-core) is the **framework** tier: steward, SDK, engineering-layer contracts. This repository pins evo-core via `[workspace.dependencies]`; it does not modify the framework.
 
-If a change here seems to require modifying evo-core, re-read evo-core's `docs/engineering/BOUNDARY.md` section 5. If a change is brand-neutral and would be useful to other audio distributions, the right home is evo-plugins-audio, not here. If you find a genuine evo-core gap, open an issue on `foonerd/evo-core`.
+If a change here seems to require modifying evo-core, re-read evo-core's `docs/engineering/BOUNDARY.md` section 5. If a change is brand-neutral and would be useful to other audio distributions, the right home is evo-device-audio, not here. If you find a genuine evo-core gap, open an issue on `foonerd/evo-core`.
 
 ## Upgrading the evo-core pin
 
