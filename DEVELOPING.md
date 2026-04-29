@@ -187,7 +187,7 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 12 | Steward Reconciliation Loop | **Wires consumer in v0.1.12**. Volumio's `composition.alsa` → `delivery.alsa` pipeline composes on the framework reconciliation surface. |
 | 13 | Catalogue corruption resilience | **Inherited transparently.** Volumio packaging does not pre-seed `catalogue.lkg.toml`; the framework's three-tier fallback is sufficient. |
 | 14 | CBOR codec | **Not used.** Volumio frontend (Vue.js) and bridge surfaces use JSON. |
-| 15 | Hot-reload `Live` mode | **Not used.** Volumio plugins are content with `Restart` mode. |
+| 15 | Hot-reload `Live` mode | **Wires consumer in v0.1.12** for in-process plugins where catalogue / operator-config reload should not drop runtime state (alarm-plugin pending alarms, library-scanner progress, metadata-cache contents). For OOP streaming-source plugins (planned Spotify, Tidal): Live mode is the schema-migration recovery path on plugin version bumps. Volumio's audio.delivery / audio.composition wardens stay on Restart — hardware-bound ALSA state is owned by Volumio's separate ALSA daemon (systemd-managed), not by the plugin code; warden-architecture-pattern preserves the audio pipeline across plugin reload without framework-side fd-passing. |
 | 16 | Happenings coalescing | **Wires consumer in v0.1.12.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
 | 17 | Subject-grammar orphan migration verb | **Not surfaced.** Framework handles internally; no Volumio operator tooling consumes the verb. |
 | 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
@@ -404,6 +404,66 @@ A future Volumio MQTT bridge plugin will translate the coalesced subscriptions t
 **`describe_capabilities` discovery flow:**
 
 Volumio's frontend, on first connect, calls `describe_capabilities` once and caches the `coalesce_labels` map. Subsequent subscriptions validate their label lists against the cached map; typos surface as console warnings during development before reaching production. The cache is invalidated on any `wire_version` change observed in subsequent reconnects.
+
+### Hot reload — Volumio specifics
+
+The canonical statement of hot-reload Live mode contract lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#hot-reload--live-mode-authoring). Volumio's specifics:
+
+**Volumio plugin Live-mode posture:**
+
+| Plugin class | Live mode opt-in | Notes |
+| --- | --- | --- |
+| `org.evoframework.alarm` (audio reference) | Yes (in-process) | Pending alarm state preserved across operator config reload (e.g., user adds a new alarm via the frontend; alarm plugin reloads without losing tracking of the morning alarm currently armed). |
+| `org.evoframework.metadata.local` (audio reference) | Yes (in-process) | Metadata cache + in-flight scan progress preserved across catalogue reload. |
+| `org.evoframework.artwork.local` (audio reference) | Yes (in-process) | Artwork cache preserved across config reload. |
+| `org.evoframework.playback.mpd` (audio reference, OOP-shaped) | Restart only | Hardware-bound state (the live MPD socket connection + ALSA pipeline) is owned by the MPD daemon (Volumio's existing systemd-managed `mpd.service`), not by the plugin code. Plugin-process restart reconnects to the running MPD; ALSA state preserved by MPD's continuity. |
+| `org.evoframework.composition.alsa` (audio reference, future v0.1.12+) | Restart only | Hardware-bound state owned by Volumio's ALSA daemon (separate process); plugin reload reconnects. |
+| `com.volumio.streaming.spotify` (planned) | Yes (OOP, Live for schema migration) | Schema-migration recovery for OAuth refresh-token format changes between plugin versions; Live used on update specifically. Default install / update uses Restart. |
+| `com.volumio.streaming.tidal` (planned) | Yes (OOP, Live for schema migration) | Same shape as Spotify. |
+| `com.volumio.sensor.*` (cec, bt_peer, alsa_jack, cpu_temp, etc.) | Restart only | Sensor state is the kernel's; nothing for the plugin to hand over. Re-spawn re-reads kernel state. |
+| `com.volumio.alarm` (vendor extensions over org.evoframework.alarm, future) | Yes (in-process) | Inherits the audio reference's Live-mode posture. |
+
+**Volumio's warden-architecture-pattern for hardware-bound state:**
+
+The audio playback flow is the canonical example. Volumio's architecture:
+
+```text
+Operator config →  com.volumio.audio.frontend (respondent, in-process)
+                                  ↓
+                                  ↓ admit / configure / control
+                                  ↓
+                        evo plugin: org.evoframework.playback.mpd (OOP)
+                                  ↓
+                                  ↓ MPD wire protocol (TCP socket)
+                                  ↓
+                        mpd.service (systemd-managed, separate from evo)
+                                  ↓
+                                  ↓ ALSA / output device control
+                                  ↓
+                                Hardware
+```
+
+The plugin code (`org.evoframework.playback.mpd`) speaks the MPD wire protocol to a separately-managed `mpd` daemon. When the plugin restarts (Restart mode), the MPD daemon keeps running with its current pipeline state intact; the plugin reconnects via TCP socket, queries current state via MPD's `status` command, resumes control. ALSA pipeline never drops; user hears no audio interruption.
+
+This is the warden-architecture-pattern in action: the resource owner (`mpd.service`) outlives the reloadable plugin code (`org.evoframework.playback.mpd` plugin process). Live mode + framework-side state handover would not be needed even if the framework supported it; the architecture handles preservation outside the framework's hot-reload primitive.
+
+**For the planned com.volumio.composition.alsa (v0.1.12+):**
+
+Volumio plans a separate ALSA-management daemon (`volumio-alsa-bridge`, systemd-managed) that owns the multi-stream ALSA pipeline state. The composition plugin in evo-core speaks a per-vendor wire protocol to this bridge daemon; plugin reload (Restart) reconnects without disturbing the live pipeline. Same warden-architecture-pattern.
+
+**`reload_plugin` invocation flow:**
+
+Volumio's frontend admin panel surfaces a "reload plugin" affordance (operator-triggered) that issues `op = "reload_plugin"` against the steward. The wire op accepts an optional `mode` field (`restart` or `live`):
+
+```json
+{
+  "op": "reload_plugin",
+  "plugin": "org.evoframework.alarm",
+  "mode": "live"
+}
+```
+
+The frontend defaults `mode` to `live` for plugins whose manifest declares `lifecycle.hot_reload = "live"`; falls back to the manifest default otherwise. Operators can override per call (force Restart even on Live-capable plugins via UI checkbox).
 
 ## Upgrading the evo-core pin
 
