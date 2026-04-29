@@ -189,7 +189,7 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 14 | CBOR codec | **Not used.** Volumio frontend (Vue.js) and bridge surfaces use JSON. |
 | 15 | Hot-reload `Live` mode | **Wires consumer in v0.1.12** for in-process plugins where catalogue / operator-config reload should not drop runtime state (alarm-plugin pending alarms, library-scanner progress, metadata-cache contents). For OOP streaming-source plugins (planned Spotify, Tidal): Live mode is the schema-migration recovery path on plugin version bumps. Volumio's audio.delivery / audio.composition wardens stay on Restart — hardware-bound ALSA state is owned by Volumio's separate ALSA daemon (systemd-managed), not by the plugin code; warden-architecture-pattern preserves the audio pipeline across plugin reload without framework-side fd-passing. |
 | 16 | Happenings coalescing | **Wires consumer in v0.1.12.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
-| 17 | Subject-grammar orphan migration verb | **Not surfaced.** Framework handles internally; no Volumio operator tooling consumes the verb. |
+| 17 | Subject-grammar orphan migration verb | **Wires consumer in v0.1.12.** Volumio frontend admin panel adds a "Catalogue grammar" view that surfaces pending grammar orphans (calls `list_grammar_orphans` on view-open and at a 60s polling interval); migration form uses dry-run-then-confirm flow; defaults `mode = "background"` for plans with `would_migrate > 1000` (Volumio's typical music library on Pi 4 / Pi 5 ranges 5k-50k tracks; NAS-backed libraries reach 200k+). Migration commands are also exposed via `volumio system grammar` CLI for SSH operators. Volumio's downstream catalogue releases document any subject-type changes in their release notes alongside the operator command. |
 | 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
 | 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
 | 20 | Runtime capabilities + version-skew policy | **Wires distribution in v0.1.12.** Every Volumio-authored warden and respondent declares its `course_correct_verbs` (wardens) and `client_request_verbs` (respondents) in its manifest before v0.1.12 release. Volumio's CI integrates the new `evo-plugin-test` crate's `assert_manifest_matches_describe` helper as a mandatory unit test in every Volumio plugin crate. Volumio's plugin sign pipeline runs `evo-plugin-tool verify` as a release-blocking step. Volumio's plugins set `evo_min_version` to the **oldest** framework version they actually require (not the version they happen to be building against), giving downstream operators on long-life devices the maximum compatible deployment window before the K8s-style skew policy forces a refresh. |
@@ -512,6 +512,69 @@ The Volumio frontend's plugin admin panel renders a warning badge next to any pl
 **`PluginVersionSkewWarning` consumer:**
 
 Volumio's frontend subscribes to `Happening::PluginVersionSkewWarning` (variant introduced in v0.1.12) and uses the stream as the data source for the admin panel's badge state. The subscription declares coalesce labels `["variant", "plugin"]` to collapse repeated re-emissions of the same warning to a single UI update.
+
+### Subject-grammar orphan migration — Volumio specifics
+
+The canonical statement of the operator-callable structured migration surface lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#subject-grammar-orphan-migration--implications-for-catalogue-authors-and-operators). Volumio's specifics:
+
+**Volumio's catalogue grammar admin view:**
+
+The Volumio frontend admin panel adds a "Catalogue grammar" section under the existing "Catalogue" administration area. The view renders:
+
+| Element | Wire op consumed | Behaviour |
+| --- | --- | --- |
+| Pending grammar orphans table | `list_grammar_orphans` (poll every 60s while view is open) | One row per `pending_grammar_orphans` entry: subject_type, count, first_observed_at, status badge (pending / migrating / accepted / resolved / recovered) |
+| "Migrate" action button | `migrate_grammar_orphans` with `dry_run = true` then with `dry_run = false` | Opens migration form (strategy selector, target type fields, reason text). Shows dry-run plan with `would_migrate` count + `estimated_duration_ms`. Operator confirms; verb is then re-issued with `dry_run = false` and `mode = "background"` if `would_migrate > 1000`, else `mode = "foreground"`. |
+| "Accept as orphaned" action button | `accept_grammar_orphans` | Opens reason-text form. Mandatory reason. Operator-issued; updates row to `accepted` status and silences future boot diagnostic warnings for that type. |
+| Migration progress indicator | Subscribe to `Happening::GrammarMigrationProgress` filtered by `migration_id` | Progress bar updates per batch. Shows `completed / target_count`. |
+
+**Volumio's chosen background-mode threshold:**
+
+Migrations with `would_migrate > 1000` default to `mode = "background"`. Volumio's typical music-library scale per device:
+
+| Hardware target | Typical library size | Default migration mode |
+| --- | --- | --- |
+| Pi Zero W (SD card, lightweight install) | 1k-5k tracks | Foreground (sub-second per migration call) |
+| Pi 3 / Pi 4 (SD card or USB SSD) | 5k-50k tracks | Foreground if `would_migrate <= 1000`; background otherwise |
+| Pi 5 (NVMe) | 5k-200k tracks | Foreground if `would_migrate <= 1000`; background otherwise |
+| NAS-backed library (any hardware) | 50k-500k+ tracks | Always background |
+
+Volumio operators on Pi Zero / Pi 3 with very large libraries (50k+ tracks on slow SD card) are advised in the dry-run output to chunk via `max_subjects = 5000` across multiple windows; Volumio frontend surfaces a "chunked migration" advanced option that issues the verb sequentially with the cap.
+
+**Volumio CLI for SSH operators:**
+
+The existing `volumio system` CLI gains a `grammar` subcommand group:
+
+```text
+volumio system grammar list
+volumio system grammar plan --from-type=<X> --strategy=<rename:to=Y | map:field=Z,mapping=... | filter:...>
+volumio system grammar migrate --from-type=<X> --strategy=<...> [--background] [--max-subjects=N] [--reason="..."]
+volumio system grammar accept --from-type=<X> --reason="..."
+```
+
+Wraps `evo-plugin-tool admin grammar` upstream; Volumio adds vendor-friendly defaults (asks for confirmation interactively before issuing real migration; auto-pages the dry-run output) and integrates with Volumio's existing operator-identity model so `--reason` is recorded against the SSH operator's identity rather than `root`.
+
+**Volumio downstream catalogue release-notes contract:**
+
+When Volumio's vendor catalogue introduces a subject-type rename or split — for example, if a future Volumio catalogue v2 adds streaming-source typing by splitting `track` into `local_track` / `streaming_track` — the corresponding Volumio release notes:
+
+1.  Bump the Volumio catalogue to a major version (Volumio's catalogue version is independent of the upstream audio reference's catalogue version).
+2.  Document the migration command verbatim in the release notes' "Upgrade procedure" section.
+3.  Include the dry-run command first; the operator runs that, reviews the output, then runs the migrate command.
+4.  Recommend the `--background` flag for libraries above 1000 tracks (which is most Volumio installations).
+
+**Volumio's `Happening::SubjectMigrated` consumers:**
+
+| Consumer | Subscription shape | Coalesce labels |
+| --- | --- | --- |
+| Frontend "now-migrating" indicator | `variants: ["grammar_migration_progress"]` filtered by current `migration_id` | None (per-batch is already the right granularity) |
+| Frontend completed-counter widget | `variants: ["subject_migrated"]` | `["variant", "from_type", "to_type", "migration_id"]` (collapses to one event per from_type/to_type pair) |
+| Future MQTT bridge (planned v0.1.13+) | `variants: ["grammar_migration_progress"]` only | `["variant", "migration_id"]` (one event per migration regardless of batch count) |
+| Audit log (forensic) | `variants: ["subject_migrated"]` | None — every per-subject event preserved at fidelity |
+
+**Volumio's `pending_grammar_orphans` boot-time observability:**
+
+On every Volumio steward boot, if `pending_grammar_orphans` rows exist with `status = pending`, Volumio's startup script writes a line to `/var/log/volumio.log` summarising the pending orphans (one summary line, not one per type) and the admin-panel route the operator should visit. Operators upgrading Volumio versions in-place (without reading release notes) get a visible, queryable signal that catalogue migration work is pending.
 
 ## Upgrading the evo-core pin
 
