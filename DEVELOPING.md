@@ -192,8 +192,9 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 17 | Subject-grammar orphan migration verb | **Not surfaced.** Framework handles internally; no Volumio operator tooling consumes the verb. |
 | 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
 | 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
+| 20 | Runtime capabilities + version-skew policy | **Wires distribution in v0.1.12.** Every Volumio-authored warden and respondent declares its `course_correct_verbs` (wardens) and `client_request_verbs` (respondents) in its manifest before v0.1.12 release. Volumio's CI integrates the new `evo-plugin-test` crate's `assert_manifest_matches_describe` helper as a mandatory unit test in every Volumio plugin crate. Volumio's plugin sign pipeline runs `evo-plugin-tool verify` as a release-blocking step. Volumio's plugins set `evo_min_version` to the **oldest** framework version they actually require (not the version they happen to be building against), giving downstream operators on long-life devices the maximum compatible deployment window before the K8s-style skew policy forces a refresh. |
 
-This table is the source of truth for Volumio's distribution-side posture. Items 6 through 19 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
+This table is the source of truth for Volumio's distribution-side posture. Items 6 through 20 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
 
 ### User Interaction Routing — Volumio specifics
 
@@ -464,6 +465,53 @@ Volumio's frontend admin panel surfaces a "reload plugin" affordance (operator-t
 ```
 
 The frontend defaults `mode` to `live` for plugins whose manifest declares `lifecycle.hot_reload = "live"`; falls back to the manifest default otherwise. Operators can override per call (force Restart even on Live-capable plugins via UI checkbox).
+
+### Runtime capabilities dispatch + version-skew — Volumio specifics
+
+The canonical statement of the warden capability gate, three-tier manifest-drift detection, and Kubernetes-style version-skew policy lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#runtime-capabilities-dispatch--manifest-drift-discipline--version-skew-policy). Volumio's specifics:
+
+**Volumio warden `course_correct_verbs` declarations:**
+
+Every Volumio-authored warden gains its manifest declaration before v0.1.12 release; same shape as the audio reference's tables. Volumio additions on top of the audio reference set:
+
+| Warden | Volumio-declared `course_correct_verbs` |
+| --- | --- |
+| `com.volumio.audio.frontend` (operator-config respondent / coordinator) | (respondent surface — uses `client_request_verbs` instead) |
+| `com.volumio.composition.alsa` (planned, v0.1.12+) | `["apply_pipeline", "add_processor", "remove_processor", "set_sample_rate", "set_channels", "set_buffer_size"]` |
+| `com.volumio.power` (Debian-systemd power warden) | `["request_sleep", "request_shutdown", "request_reboot", "schedule_wake", "cancel_wake", "set_dim_level"]` |
+| `com.volumio.network` (where Volumio manages WiFi / Ethernet) | `["set_wifi_credentials", "scan_networks", "set_static_ip", "release_dhcp", "renew_dhcp"]` |
+| `com.volumio.streaming.spotify` (planned) | `["start_playback", "stop_playback", "transfer_playback", "refresh_token"]` |
+| `com.volumio.streaming.tidal` (planned) | (mirrors Spotify shape) |
+
+The list is per-warden and stable across plugin releases except by deliberate plugin-version bump; new verbs land with explicit version increments and the K8s-style skew policy below grants the warden's consumers grace.
+
+**Volumio CI integration of the three-tier drift detection:**
+
+| Tier | Volumio's adoption |
+| --- | --- |
+| Sign-time (`evo-plugin-tool verify`) | Volumio's plugin packaging pipeline (`debian/rules` for vendored plugins, `cargo` workspace job for in-tree plugins) runs `evo-plugin-tool verify` as a release-blocking step. Verification failure prevents the `.deb` from building. |
+| Admission-time | Inherited transparently from the framework. Steward refuses to admit a plugin whose `describe()` doesn't match its manifest. Volumio's bring-up runbook documents how to read `AdmissionError::ManifestDrift` from the steward log. |
+| CI-time (`assert_manifest_matches_describe`) | Volumio's plugin crates each carry a unit test using `evo_plugin_test::assert_manifest_matches_describe(&plugin)`. The Volumio repo's CI workflow runs `cargo test --workspace` and gates merge on this. |
+
+**Volumio's `evo_min_version` policy per plugin:**
+
+| Plugin | Plugin author's stance on `evo_min_version` |
+| --- | --- |
+| `com.volumio.audio.frontend` | Set to oldest framework version that satisfies the plugin's actual feature dependencies (not the version available at build time). Lets long-life Volumio installations on slow-update tracks keep working through the framework's two-cycle grace window. |
+| `com.volumio.power` | Same. |
+| `com.volumio.network` | Same. |
+| `com.volumio.composition.alsa` | Targeted at v0.1.12 features (warden-side capability gate, fast-path, watches consumer integration); declares `evo_min_version = "0.1.12"`. |
+| `com.volumio.streaming.spotify` | Will be authored against the v0.1.12 user-interaction-routing surface; declares `evo_min_version = "0.1.12"`. |
+| `com.volumio.streaming.tidal` | Same. |
+| `com.volumio.sensor.*` (cec, bt_peer, alsa_jack, usb_audio_enumerator, cpu_temp, network_state) | Declares `evo_min_version = "0.1.12"` because each sensor plugin emits via `Happening::PluginEvent` (introduced in v0.1.12). |
+
+**Operator-visible skew warnings:**
+
+The Volumio frontend's plugin admin panel renders a warning badge next to any plugin admitted in the warn-band (current - 2). The badge text reads "Plugin built against an older framework — refresh recommended." Clicking the badge opens the plugin update flow (if a newer version is available in the Volumio plugin store) or displays the plugin author's contact / upstream URL. Plugins refused at the (current - 3 or older) line surface as a separate "Refused — out of date" tab in the admin panel; the operator can purge them via the plugins administration verbs (item 6).
+
+**`PluginVersionSkewWarning` consumer:**
+
+Volumio's frontend subscribes to `Happening::PluginVersionSkewWarning` (variant introduced in v0.1.12) and uses the stream as the data source for the admin panel's badge state. The subscription declares coalesce labels `["variant", "plugin"]` to collapse repeated re-emissions of the same warning to a single UI update.
 
 ## Upgrading the evo-core pin
 
