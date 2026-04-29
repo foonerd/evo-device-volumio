@@ -659,6 +659,77 @@ If a Volumio catalogue update tightens cardinality and operator opts into `allow
 
 Future Volumio MQTT bridge (planned v0.1.13+) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
 
+### Catalogue schemas — Volumio specifics
+
+The canonical statement of the schemas surface and its consumer integration model lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#catalogue-schemas--implications-for-plugin-authors-and-distribution-packagers). The brand-neutral framework-tier schemas live at [`foonerd/evo-catalogue-schemas`](https://github.com/foonerd/evo-catalogue-schemas). Volumio's specifics:
+
+**Volumio's two schema sources:**
+
+| Namespace | Source | Volumio's role |
+| --- | --- | --- |
+| `org.evoframework.*` | [`foonerd/evo-catalogue-schemas`](https://github.com/foonerd/evo-catalogue-schemas) | Consumer. Volumio plugins implementing brand-neutral shelves (audio.delivery, audio.composition, metadata.library, etc.) target schemas hosted upstream. |
+| `com.volumio.*` | Volumio's own schemas publication (this repo's `dist/catalogue/schemas/` plus a future `volumio-evo-catalogue-schemas` repo when the schema set grows) | Owner. Volumio authors and maintains schemas for Volumio-specific shelves (`com.volumio.streaming.spotify`, `com.volumio.sensor.cec`, `com.volumio.audio.frontend`, etc.). |
+
+**Volumio's `volumio-evo-schemas` Debian package:**
+
+Volumio ships a separate `volumio-evo-schemas` `.deb` package that installs:
+
+```text
+/usr/share/evo-catalogue-schemas/
+├── org.evoframework/        # mirrored from foonerd/evo-catalogue-schemas at the pinned tag
+└── com.volumio/             # Volumio's own brand-namespace schemas
+```
+
+The package's source is a build script that:
+
+1.  Clones `foonerd/evo-catalogue-schemas` at the version Volumio's distribution release pins.
+2.  Copies its `schemas/org.evoframework/` tree into the package payload.
+3.  Adds Volumio's own `schemas/com.volumio/` tree (authored in-tree in this repo for now; will move to a separate repo once it grows beyond a handful of shelves).
+4.  Builds the `.deb` with `Depends: volumio-evo (>= <minimum-compatible-evo-core-version>)`.
+
+The package depends on evo-core's binary package (which carries `evo-plugin-tool`); installing the schemas package alone has no effect without evo-plugin-tool for validation tooling.
+
+**Volumio's pinning policy:**
+
+| Component | Volumio's pin choice |
+| --- | --- |
+| `foonerd/evo-catalogue-schemas` | Pinned to the version that ships every shelf shape Volumio's plugins target. Bumped when a Volumio plugin starts targeting a new shelf or new shape. |
+| `foonerd/evo-core` | Pinned to a compatible evo-core version per the Kubernetes-style version-skew policy (current / current - 1 / warn-band / refused). |
+| Volumio's own `com.volumio.*` schemas | Versioned alongside Volumio's own plugin releases; tracked in this repo's CHANGELOG. |
+
+**Volumio plugin author workflow:**
+
+A Volumio plugin author implementing a brand-neutral shelf (e.g., `org.evoframework.audio.composition` shape v1):
+
+1.  Read the schema at `/usr/share/evo-catalogue-schemas/org.evoframework/audio/composition.v1.toml` (installed by the schemas package). The TOML is the code contract.
+2.  Author the plugin against the schema. Volumio's plugin author guide (separate doc, future) walks through the request types and payload shapes as a learning exercise.
+3.  Validate locally via:
+
+    ```sh
+    evo-plugin-tool validate-shelf-schema \
+      --plugin=path/to/your/plugin.toml
+      # --schemas-path defaults to /usr/share/evo-catalogue-schemas/
+    ```
+
+4.  Volumio's plugin packaging pipeline (`debian/rules` for vendored plugins) runs `evo-plugin-tool validate-shelf-schema` as a release-blocking step; merging without a passing validation is refused.
+
+A Volumio plugin author implementing a Volumio-specific shelf (e.g., `com.volumio.streaming.spotify`) follows the same flow but reads the schema from `/usr/share/evo-catalogue-schemas/com.volumio/streaming/spotify.v1.toml` instead — same path, different namespace.
+
+**Volumio's contribution path back to upstream:**
+
+If a Volumio shelf evolves over time from Volumio-specific to brand-neutral (e.g., another distribution adopts the same contract independently), Volumio submits a PR against `foonerd/evo-catalogue-schemas` proposing the shelf for `org.evoframework.*` adoption. The schemas-repo CONTRIBUTING.md spells out the discussion + review process; once accepted, Volumio's own plugins migrate from `com.volumio.<rack>.<shelf>` to `org.evoframework.<rack>.<shelf>` at Volumio's own release cadence.
+
+**Volumio frontend admin panel surfacing:**
+
+Volumio's "About this device" admin panel includes a "Catalogue schemas version" line showing:
+
+| Item | Value |
+| --- | --- |
+| Brand-neutral schemas | `evo-catalogue-schemas v0.X.Y` (from the package's installed metadata) |
+| Volumio-specific schemas | `volumio-evo-schemas v<vendor-version>` (Volumio's own package version) |
+
+This lets operators on a deployed device check which schemas version their plugins were validated against — useful when troubleshooting plugin admission issues that may stem from schemas-pin drift between the build environment and the device.
+
 ## Upgrading the evo-core pin
 
 1.  Verify the new evo-core tag is green (`cargo test --workspace` in evo-core).
