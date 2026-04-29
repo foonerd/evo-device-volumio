@@ -190,7 +190,7 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 15 | Hot-reload `Live` mode | **Wires consumer in v0.1.12** for in-process plugins where catalogue / operator-config reload should not drop runtime state (alarm-plugin pending alarms, library-scanner progress, metadata-cache contents). For OOP streaming-source plugins (planned Spotify, Tidal): Live mode is the schema-migration recovery path on plugin version bumps. Volumio's audio.delivery / audio.composition wardens stay on Restart — hardware-bound ALSA state is owned by Volumio's separate ALSA daemon (systemd-managed), not by the plugin code; warden-architecture-pattern preserves the audio pipeline across plugin reload without framework-side fd-passing. |
 | 16 | Happenings coalescing | **Wires consumer in v0.1.12.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
 | 17 | Subject-grammar orphan migration verb | **Wires consumer in v0.1.12.** Volumio frontend admin panel adds a "Catalogue grammar" view that surfaces pending grammar orphans (calls `list_grammar_orphans` on view-open and at a 60s polling interval); migration form uses dry-run-then-confirm flow; defaults `mode = "background"` for plans with `would_migrate > 1000` (Volumio's typical music library on Pi 4 / Pi 5 ranges 5k-50k tracks; NAS-backed libraries reach 200k+). Migration commands are also exposed via `volumio system grammar` CLI for SSH operators. Volumio's downstream catalogue releases document any subject-type changes in their release notes alongside the operator command. |
-| 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
+| 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12.** Volumio frontend admin panel surfaces both verbs under a "Distribution updates" section. Volumio's `volumio system reload` CLI subcommand group wraps them for SSH operators. Volumio's apt-based update pipeline (postinst hook on `.deb` install) calls the verbs sequentially after package install completes — no steward restart needed for catalogue / manifest rollouts. Volumio's downstream catalogue release notes document any required `--allow-cardinality-divergence` opt-ins or pre-cleanup steps. |
 | 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
 | 20 | Runtime capabilities + version-skew policy | **Wires distribution in v0.1.12.** Every Volumio-authored warden and respondent declares its `course_correct_verbs` (wardens) and `client_request_verbs` (respondents) in its manifest before v0.1.12 release. Volumio's CI integrates the new `evo-plugin-test` crate's `assert_manifest_matches_describe` helper as a mandatory unit test in every Volumio plugin crate. Volumio's plugin sign pipeline runs `evo-plugin-tool verify` as a release-blocking step. Volumio's plugins set `evo_min_version` to the **oldest** framework version they actually require (not the version they happen to be building against), giving downstream operators on long-life devices the maximum compatible deployment window before the K8s-style skew policy forces a refresh. |
 
@@ -575,6 +575,89 @@ When Volumio's vendor catalogue introduces a subject-type rename or split — fo
 **Volumio's `pending_grammar_orphans` boot-time observability:**
 
 On every Volumio steward boot, if `pending_grammar_orphans` rows exist with `status = pending`, Volumio's startup script writes a line to `/var/log/volumio.log` summarising the pending orphans (one summary line, not one per type) and the admin-panel route the operator should visit. Operators upgrading Volumio versions in-place (without reading release notes) get a visible, queryable signal that catalogue migration work is pending.
+
+### Reload-catalogue / reload-manifest — Volumio specifics
+
+The canonical statement of the two operator-callable verbs lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#reload-catalogue--reload-manifest--implications-for-catalogue-authors-and-operators). Volumio's specifics:
+
+**Volumio's "Distribution updates" admin view:**
+
+The Volumio frontend admin panel adds a "Distribution updates" section under the existing "System" administration area. The view consumes the verbs as follows:
+
+| Element | Wire op consumed | Behaviour |
+| --- | --- | --- |
+| "Reload catalogue" action | `reload_catalogue` with `dry_run = true` then `dry_run = false` | Two-step UI: dry-run plan rendered (added racks, removed racks, plugins-to-be-refused, cardinality violations); operator confirms; then real reload issued. Defaults to `force = false` (idempotent skip on unchanged source); explicit "Force reload" toggle for re-evaluation against same source. |
+| "Reload plugin manifest" per-plugin action | `reload_manifest` (per plugin) | Single-step UI for plugins where code unchanged. Paired with "Reload plugin code" on a multi-action button when both changed (issues `reload_plugin` first, then `reload_manifest`). |
+| "Allow cardinality divergence" advanced toggle | `allow_cardinality_divergence` flag | Hidden behind an "Advanced" disclosure; Volumio surfaces it with a warning ("Catalogue update will accept current storage that violates new cardinality rules; resolution required after reload"). Operator must explicitly confirm. |
+| Reload result indicator | Subscribe to `Happening::CatalogueReloaded` / `ManifestReloaded` / `Reserved::*Invalid` / `Reserved::CardinalityViolation` | Toast notifications: success (green), failure with structured error fields (red), per-shelf cardinality violation (yellow) with "Resolve" action linking to the relevant rack admin view. |
+
+**Volumio CLI for SSH operators:**
+
+The existing `volumio system` CLI gains a `reload` subcommand group:
+
+```text
+volumio system reload catalogue [--force] [--allow-cardinality-divergence] [--reason="..."]
+volumio system reload manifest --plugin=<id> [--force] [--reason="..."]
+volumio system reload plan {catalogue, manifest --plugin=<id>}
+```
+
+Wraps `evo-plugin-tool admin reload` upstream; Volumio adds vendor-friendly defaults (asks for confirmation interactively, auto-pages dry-run output, integrates with Volumio's operator-identity model so `--reason` is recorded against the SSH operator's identity rather than `root`).
+
+**Volumio apt-based update pipeline integration:**
+
+Volumio ships catalogue and manifest updates via the existing Debian package pipeline. The `volumio-evo` package's postinst hook (run automatically by `apt install` / `apt upgrade`) executes the verbs in sequence after the package's payload has been written to disk:
+
+```text
+# In debian/volumio-evo.postinst:
+case "$1" in
+    configure)
+        # Catalogue update first (idempotent if unchanged).
+        evo-plugin-tool admin reload catalogue \
+            --reason="apt: $DPKG_MAINTSCRIPT_PACKAGE $2 -> $3" \
+            || journalctl-log-failure
+
+        # Per-plugin manifest reload (idempotent; only changed manifests do work).
+        for plugin_id in $(volumio-evo list-installed-plugins); do
+            evo-plugin-tool admin reload manifest \
+                --plugin="$plugin_id" \
+                --reason="apt: $DPKG_MAINTSCRIPT_PACKAGE $2 -> $3" \
+                || journalctl-log-warning  # non-fatal; plugin-specific issue
+        done
+        ;;
+esac
+```
+
+The catalogue reload is failure-fatal (a bad catalogue ships, package install reports failure, apt rollback path engages). Manifest reloads are failure-warning only (one bad plugin manifest doesn't fail the whole package install).
+
+**Volumio's downstream catalogue release-notes contract for reload semantics:**
+
+When Volumio's vendor catalogue introduces racks, removes racks, or changes cardinality rules, the corresponding Volumio package release notes:
+
+1.  State whether the change is additive (no operator action needed beyond apt install) or breaking (operator-visible reload failures or cardinality violations expected).
+2.  For breaking changes, document the resolution path: cleanup operator commands run before the reload (e.g., `volumio system grammar accept --from-type=...` for type removals), or the `--allow-cardinality-divergence` flag if the operator opts into a conscious migration.
+3.  Include the dry-run command first; the operator runs that to see what's about to happen, then runs the apply command.
+
+**Volumio's reload happenings consumer:**
+
+The Volumio frontend subscribes to all five Reserved/success variants:
+
+| Variant | Subscription shape | Coalesce labels |
+| --- | --- | --- |
+| `Happening::Reserved::CatalogueInvalid` | `variants: ["reserved_catalogue_invalid"]` | `["variant"]` (catalogue-wide failure; collapse repeated emissions during retry) |
+| `Happening::Reserved::CardinalityViolation` | `variants: ["reserved_cardinality_violation"]` | `["variant", "shelf"]` (per-shelf violation, collapsed on shelf identity) |
+| `Happening::Reserved::ManifestInvalid` | `variants: ["reserved_manifest_invalid"]` | `["variant", "plugin"]` (per-plugin failure) |
+| `Happening::CatalogueReloaded` | `variants: ["catalogue_reloaded"]` | None (each successful reload is a discrete event) |
+| `Happening::ManifestReloaded` | `variants: ["manifest_reloaded"]` | `["variant", "plugin"]` (per-plugin update; collapse if multiple manifests reloaded in one apt run) |
+
+The subscriptions feed the admin-panel toast notification stream and persist to the operator audit log via Volumio's separate audit-log service.
+
+**Volumio's cardinality-divergence resolution flow:**
+
+If a Volumio catalogue update tightens cardinality and operator opts into `allow_cardinality_divergence = true`, the resulting `Happening::Reserved::CardinalityViolation` events surface in the admin panel as a per-shelf "Resolution needed" badge. Clicking the badge opens a resolution wizard that surfaces the offending subjects and offers per-shelf actions (delete excess subjects, force-retract their owning plugins, accept the violation as permanent). This is a Volumio frontend-only flow; the framework provides the structured signal, Volumio decides the UX.
+
+**Volumio's reload monitoring dashboard:**
+
+Future Volumio MQTT bridge (planned v0.1.13+) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
 
 ## Upgrading the evo-core pin
 
