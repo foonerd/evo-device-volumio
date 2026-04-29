@@ -188,7 +188,7 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 13 | Catalogue corruption resilience | **Inherited transparently.** Volumio packaging does not pre-seed `catalogue.lkg.toml`; the framework's three-tier fallback is sufficient. |
 | 14 | CBOR codec | **Not used.** Volumio frontend (Vue.js) and bridge surfaces use JSON. |
 | 15 | Hot-reload `Live` mode | **Not used.** Volumio plugins are content with `Restart` mode. |
-| 16 | Happenings coalescing | **Not used in v0.** Volumio frontend handles `CustodyStateReported` bursts client-side. |
+| 16 | Happenings coalescing | **Wires consumer in v0.1.12.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
 | 17 | Subject-grammar orphan migration verb | **Not surfaced.** Framework handles internally; no Volumio operator tooling consumes the verb. |
 | 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
 | 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
@@ -361,6 +361,49 @@ For sensor plugins emitting state-change happenings, the frontend's "Devices" pa
 -   Auto-mount NAS on network-up — Volumio's existing NAS-mount logic is operator-driven; future automation could use a watch on `com.volumio.sensor.network_state`.
 
 Composition with appointments: Volumio scenarios that combine time + condition (e.g., "set evening unwind playlist when network is up between 21:00 and 23:00") use both primitives — an appointment fires at 21:00 to issue a check; if network is up, dispatch the playlist; if not, set a watch on network-up that expires at 23:00. Volumio's audio-path-management plugin orchestrates these compositions; framework provides the primitives.
+
+### Happenings coalescing — Volumio specifics
+
+The canonical statement of the coalescing contract lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#happenings-coalescing--implications-for-plugins-and-consumer-surfaces). Volumio's specifics:
+
+**Volumio frontend coalesce subscriptions:**
+
+The Volumio web frontend (Vue.js) opens multiple subscriptions to `subscribe_happenings` with different coalesce label lists, one per UI surface that consumes high-rate streams:
+
+| UI surface | Filter | Coalesce labels | Window | Selection |
+| --- | --- | --- | --- | --- |
+| Now-playing position meter | `variants: ["custody_state_reported"]`, `plugins: ["org.evoframework.playback.mpd"]` | `["variant", "plugin", "shelf", "handle_id"]` | 100 ms | latest |
+| Now-playing metadata + artwork composite | (any variant) | `["primary_subject_id"]` | 200 ms | latest |
+| Volume / mute indicator | `variants: ["custody_state_reported"]`, `shelves: ["audio.volume"]` | `["variant", "plugin", "shelf"]` | 50 ms | latest |
+| Audio-path-switching watch fires | `variants: ["watch_fired"]` | `["variant", "watch_id"]` | 0 (no coalesce; transitions matter) | n/a |
+| CPU temp telemetry (admin panel) | `variants: ["plugin_event"]`, `plugins: ["com.volumio.sensor.cpu_temp"]` | `["variant", "plugin", "sensor_id"]` | 60000 ms | latest |
+| Network state changes | `variants: ["plugin_event"]`, `plugins: ["com.volumio.sensor.network_state"]` | `["variant", "plugin", "interface"]` | 1000 ms | latest |
+| Audit log / forensic stream | (any variant) | (no coalesce) | n/a | n/a |
+
+The forensic stream is intentionally not coalesced — operators reviewing the audit trail need every event at fidelity. The other surfaces collapse their high-rate streams to UI-readable rates.
+
+**Volumio's sensor and hardware-event plugins emit through `PluginEvent`:**
+
+Each Volumio sensor plugin emits `Happening::PluginEvent { plugin: "com.volumio.sensor.<name>", event_type: "<name>", payload: {...}, at }`. The payload field schema is documented per plugin and stable across releases:
+
+| Plugin | event_type | Payload field schema |
+| --- | --- | --- |
+| `com.volumio.sensor.cec` | `arc_state_change` | `{ port, state: "active" \| "inactive", source }` |
+| `com.volumio.sensor.bt_peer` | `peer_state_change` | `{ peer_id, peer_name, state: "connected" \| "disconnected" }` |
+| `com.volumio.sensor.alsa_jack` | `jack_change` | `{ jack: "headphone-3.5mm", inserted: bool }` |
+| `com.volumio.sensor.usb_audio_enumerator` | (factory plugin: emits via subject announce / retract, not PluginEvent) | n/a |
+| `com.volumio.sensor.cpu_temp` | `reading` | `{ sensor_id: "cpu", value_celsius, unit: "C" }` |
+| `com.volumio.sensor.network_state` | `state_change` | `{ interface, state: "up" \| "down", reason }` |
+
+These payload schemas are part of Volumio's public plugin contract; consumer surfaces (frontend, MQTT bridge) build coalesce configs against them. Volumio's plugin-author guide (separate doc, future) captures the schema versioning rule: payload fields can be added without breaking consumers; renames or removals require a coordinated frontend update.
+
+**Volumio MQTT bridge (planned v0.1.13+):**
+
+A future Volumio MQTT bridge plugin will translate the coalesced subscriptions to MQTT topics. Coarse-grained subscriptions (per-subject, per-handle) become low-frequency MQTT publishes; fine-grained subscriptions (forensic, per-individual-fire) stay on the Unix-socket path. The bridge declares its own coalesce configs per topic; the framework's per-subscriber coalescing means the bridge's downstream rate is decoupled from the bus's emission rate.
+
+**`describe_capabilities` discovery flow:**
+
+Volumio's frontend, on first connect, calls `describe_capabilities` once and caches the `coalesce_labels` map. Subsequent subscriptions validate their label lists against the cached map; typos surface as console warnings during development before reaching production. The cache is invalidated on any `wire_version` change observed in subsequent reconnects.
 
 ## Upgrading the evo-core pin
 
