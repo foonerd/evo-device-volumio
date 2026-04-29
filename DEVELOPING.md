@@ -182,7 +182,7 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 7 | Flight mode device plugin | **Wires consumer in v0.1.12**. Concrete hardware-control plugin authored if and when Volumio expands to targets with vendor-managed Bluetooth / cellular radios. Current Volumio targets (Pi 4 / Pi 5 + USB DAC, x86 + onboard audio) expose no controllable radios under Volumio's management; OS-level network manager handles WiFi / Ethernet. |
 | 8 | User Interaction Routing | **Wires consumer in v0.1.12**. Volumio frontend surfaces auth-flow prompts (Spotify, Tidal, NAS credentials) as modal dialogs. |
 | 9 | Appointments rack | **Not used in v0.** No time-driven Volumio plugins; future "scheduled playback" feature would consume. |
-| 10 | Watches rack | **Not used in v0.** No condition-driven Volumio plugins; future "auto-resume on network up" would consume. |
+| 10 | Watches rack | **Wires consumer in v0.1.12** for audio-path-switching scenarios. Volumio ships pre-configured watches for HDMI ARC handover, Bluetooth peer connect / disconnect, 3.5mm jack insertion (where hardware exposes it via ALSA jack-detect), and USB DAC plug events. Sensor / hardware-event plugins (CEC, BT peer manager, USB enumerator) are Volumio-authored under `com.volumio.sensor.*` namespace. |
 | 11 | Fast Path | **Wires consumer in v0.1.12**. Volumio frontend uses Fast Path for transport ops (volume, pause, seek) where latency budgets matter. |
 | 12 | Steward Reconciliation Loop | **Wires consumer in v0.1.12**. Volumio's `composition.alsa` → `delivery.alsa` pipeline composes on the framework reconciliation surface. |
 | 13 | Catalogue corruption resilience | **Inherited transparently.** Volumio packaging does not pre-seed `catalogue.lkg.toml`; the framework's three-tier fallback is sufficient. |
@@ -316,6 +316,51 @@ The user's day-schedule pattern (sleep at 23:00, wake at 06:30 via RTC) routes t
 **Operator-config schema vendor extensions:**
 
 Volumio reserves the namespace `[[alarms.volumio]]` for Volumio-specific alarm fields the canonical schema doesn't cover (e.g., custom Volumio sound-preset references, Volumio-frontend-rendering hints). The audio reference's alarm plugin ignores fields outside the canonical schema; Volumio-specific extensions are read by Volumio-specific tooling only.
+
+### Watches — Volumio specifics
+
+The canonical statement of the watches contract lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#watches--implications-for-plugins-and-ui). Volumio's specifics — particularly the audio-path-switching scenarios Volumio ships pre-configured:
+
+**Audio-path-switching watches Volumio ships out-of-box:**
+
+| Scenario | Volumio sensor / event plugin | Watch shape | Action |
+| --- | --- | --- | --- |
+| HDMI ARC active | `com.volumio.sensor.cec` (per-target Pi 5 / x86 with HDMI; uses libcec or kernel CEC driver) | Edge `SubjectState` on the ARC port subject | Switch `audio.delivery` output to the ARC port |
+| HDMI ARC inactive | Same plugin | Edge `SubjectState` transition out | Revert to default output |
+| Bluetooth headphones connect | `com.volumio.sensor.bt_peer` (BlueZ-based on Linux targets) | Edge `SubjectState` on the BT peer subject | Switch output to the BT peer |
+| Bluetooth peer disconnect | Same plugin | Edge `SubjectState` transition out | Revert to previous output |
+| 3.5mm headphone jack insertion (where hardware supports ALSA jack-detect) | `com.volumio.sensor.alsa_jack` (per-target; some Pi HATs expose this) | `HappeningMatch` on jack-insertion variant | Switch output to headphone-3.5mm; mute internal amp |
+| USB DAC plugged in | `com.volumio.sensor.usb_audio_enumerator` (factory plugin admitting one instance subject per DAC under the `evo-factory-instance` addressing scheme) | Watch on subject creation events for `evo-factory-instance` of `usb-dac-*` | Switch output to the new DAC |
+| USB DAC unplugged | Same plugin (subject retract on disconnect) | Watch on subject retract events | Revert to previous output |
+
+These watches are created at the `org.evoframework.alarm`-style level (Volumio's audio-path-management plugin reads operator config and creates the watches at admit time); operators can override the auto-switch behaviour via the Volumio frontend (e.g., "always use HDMI when active" vs "let me confirm before switching").
+
+**Volumio-authored sensor and hardware-event plugins:**
+
+| Plugin | Trust class | Hardware coverage |
+| --- | --- | --- |
+| `com.volumio.sensor.cec` | Privileged (CEC needs `/dev/cec0` access) | Pi 5 / x86 with HDMI |
+| `com.volumio.sensor.bt_peer` | Privileged (BlueZ D-Bus) | All Volumio targets with BT |
+| `com.volumio.sensor.alsa_jack` | Standard (ALSA jack-detect via /proc) | Per-HAT support; not all Volumio targets |
+| `com.volumio.sensor.usb_audio_enumerator` | Privileged (udev events) | All Volumio targets |
+| `com.volumio.sensor.cpu_temp` | Sandbox (read-only `/sys/class/thermal/`) | All Volumio targets |
+| `com.volumio.sensor.network_state` | Standard (NetworkManager D-Bus) | All Volumio targets |
+
+Each plugin is signed under the Volumio vendor key; admitted on `producer.sensor.*` or `producer.hardware.*` shelves the Volumio catalogue declares; emits structured happenings on the bus that audio-path watches subscribe to.
+
+**Volumio frontend integration:**
+
+The Volumio web frontend surfaces a "Watches" panel in the operator settings showing every active watch — both system-created (audio-path switching) and operator-created (custom condition-driven flows). The panel uses the `list_watches` and `subscribe_subject` ops; capability-negotiated `watches_admin` for the operator-tooling user.
+
+For sensor plugins emitting state-change happenings, the frontend's "Devices" panel reflects the live state so operators see what hardware is connected (BT peers, USB DACs, ARC-active TVs) without leaving the Volumio UI.
+
+**Watches NOT shipped in v0:**
+
+-   Auto-pause when motion sensor reports "no motion for 30 minutes" — not in v0; future addition with operator opt-in.
+-   Auto-throttle CPU on overheat — `com.volumio.sensor.cpu_temp` ships in v0 emitting readings; the throttle action is a future addition (the `system.power.cpu_throttle` action target needs implementation per the power warden's roadmap).
+-   Auto-mount NAS on network-up — Volumio's existing NAS-mount logic is operator-driven; future automation could use a watch on `com.volumio.sensor.network_state`.
+
+Composition with appointments: Volumio scenarios that combine time + condition (e.g., "set evening unwind playlist when network is up between 21:00 and 23:00") use both primitives — an appointment fires at 21:00 to issue a check; if network is up, dispatch the playlist; if not, set a watch on network-up that expires at 23:00. Volumio's audio-path-management plugin orchestrates these compositions; framework provides the primitives.
 
 ## Upgrading the evo-core pin
 
