@@ -10,7 +10,7 @@ A typo in an ALSA parameter is a one-line config edit, not a redeploy. A bug in 
 
 ```mermaid
 flowchart LR
-    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags (v0.1.9)"]
+    core["<b>evo-core</b><br/><i>framework, upstream</i><br/>source + tags + signed binaries"]
     ref["<b>evo-device-audio</b><br/><i>reference generic device</i><br/>brand-neutral plugins<br/>+ device build"]
     src["<b>evo-device-volumio</b><br/><i>this repo</i><br/>vendor extensions"]
     art["<b>evo-device-volumio-artefacts</b><br/><i>vendor release plane</i><br/>manifest + signed bytes"]
@@ -24,7 +24,7 @@ flowchart LR
 
 Four repositories, one flow. `evo-core` ships source and tags. `evo-device-audio` is the reference generic device — brand-neutral audio plugins under `org.evoframework.*` plus the device build that links them. This repository extends that reference with Volumio-specific plugins (`com.volumio.*`), branding, and any divergent UI; it signs its own pieces with the vendor key and publishes to its own artefacts repository. Devices admit `org.evoframework.*` plugins from the reference and `com.volumio.*` plugins from here.
 
-The architectural arrangement is captured in ADR-0032 (supersedes ADR-0026): framework / reference generic device / vendor distribution.
+The architectural arrangement: framework (evo-core) / reference generic device (evo-device-audio) / vendor distribution (this repo). Each tier has its own release cadence and signing key; the whole stack composes into the device's deployable image.
 
 ## Status
 

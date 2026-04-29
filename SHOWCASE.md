@@ -1,16 +1,18 @@
 # SHOWCASE
 
-`evo-device-volumio` is the first distribution built on the evo framework. This document has two audiences.
+`evo-device-volumio` is one vendor distribution built on the evo framework — a worked example of how a vendor adopts the framework's reference generic device for the audio domain. The framework's canonical demonstration of every core function lives in [`evo-device-audio`](https://github.com/foonerd/evo-device-audio): the reference generic device that ships brand-neutral plugins (MPD playback, ALSA composition, file-tag metadata, local artwork, etc.) under the `org.evoframework.*` namespace, signed by the evo project. Volumio imports those plugins by name and adds the vendor layer on top.
 
-The first is this distribution's own engineering: the people writing the catalogue and the plugins in this repository. The second is any future `evo-device-<brand>` that comes after it. This document exists primarily for the second audience. Its purpose is to show, in enough concrete detail to be reproducible, how a vendor builds an evo distribution from zero.
+This document has two audiences.
 
-Everywhere this document names "Volumio", a future distribution reads "their own brand". Everywhere it names "Raspberry Pi", a future distribution reads "their own target hardware". The pattern survives the substitution; the instance illustrates it. If a section only makes sense for Volumio, it belongs elsewhere. If it makes sense for any distribution, it belongs here.
+The first is this distribution's own engineering: the people writing the Volumio catalogue, the Volumio-specific plugins, and the Volumio packaging in this repository. The second is any future `evo-device-<vendor>` adopting the same audio reference (or, by analogous pattern, a non-audio reference generic device when one ships). This document exists primarily for the second audience. Its purpose is to show, in concrete detail, how a vendor distribution stocks the per-piece release plane on top of an evo reference.
+
+Everywhere this document names "Volumio", a future vendor reads "their own brand". Everywhere it names "Raspberry Pi", a future vendor reads "their own target hardware". The pattern survives the substitution; the instance illustrates it. The canonical statement of what evo-core, a reference generic device, and a vendor distribution each contribute to a deployable device is in the framework's own engineering docs (`evo-core/docs/engineering/BOUNDARY.md`); this document is the Volumio-side picture of the vendor tier of that split.
 
 ## 1. Prerequisites
 
 Six conditions must be true before work on any `evo-device-<brand>` distribution begins.
 
-1.  **The framework exists and is pinnable.** A tagged release of `evo-core` the distribution can depend on. For this distribution: evo-core v0.1.9.
+1.  **The framework exists and is pinnable.** A tagged release of `evo-core` the distribution can depend on, and a tagged release of the relevant reference generic device (`evo-device-audio` for audio distributions). For this distribution: evo-core at the current pinned tag, plus `evo-device-audio` as the source of brand-neutral audio plugins.
 2.  **The domain is stated.** A concept document in the distribution's own voice, naming what the device does in catalogue vocabulary (racks, shelves, relation predicates). Everything else flows from it. For this distribution: `volumio-evo-concept.md`.
 3.  **The target is chosen.** Hardware platform and operating system. For this distribution: Raspberry Pi, Raspberry Pi OS Lite, `aarch64`.
 4.  **The minimum is defined.** The one-sentence behaviour that makes the device a Proof of Concept rather than a scaffolded shell. For this distribution: "plays an audio file from local storage to the configured ALSA output, with metadata and artwork visible to any consumer that asks".
@@ -19,42 +21,54 @@ Six conditions must be true before work on any `evo-device-<brand>` distribution
 
 ## 2. Who is responsible for what
 
-The distribution vendor owns the supply chain from source to device. Specifically:
+Source and signing responsibility splits across three actors. Each owns its tier of the supply chain.
 
--   `evo-core` ships source and tags. Never binaries.
--   The vendor clones `evo-core` at the pinned tag, builds the steward together with its own plugins and catalogue, signs the results with its own key, and publishes to its own location.
--   Every artefact a device trusts is signed by the vendor. Operator trust is placed in the vendor. The framework does not sign for devices.
--   The vendor owns the artefacts' lifecycle: build, sign, publish, promote between channels, revoke when necessary.
+-   **The evo project** ships source, tags, AND signed per-arch binaries for evo-core (the steward + `evo-plugin-tool`) under the framework release signing key. Available in `foonerd/evo-core-artefacts`. The evo project also ships `evo-device-audio` source plus signed reference-plugin bundles under the commons signing key (the brand-neutral audio plugins).
+-   **The vendor distribution** (`evo-device-volumio`, this repo) admits the framework's signed binaries and the reference generic device's signed plugin bundles by name, layers its catalogue / branding / packaging / vendor-specific plugins on top, and publishes the resulting per-device pieces under the vendor's own signing key.
+-   **The operator** trusts whichever signing keys their distribution bundles plus any keys the operator installs locally per `evo-core/docs/engineering/PLUGIN_PACKAGING.md` §5.
 
-A consequence worth stating plainly: the framework's release cadence does not drive the distribution's release cadence. The distribution bumps its `evo-core` pin when it chooses.
+A consequence worth stating plainly: the framework's release cadence, the reference generic device's release cadence, and this distribution's release cadence are independent. The distribution bumps its `evo-core` pin when it chooses, and its `evo-device-audio` pin when it chooses; either bump may happen without the other.
 
-## 3. Three repositories
+## 3. Five repositories
 
-Three repositories are in scope for this distribution. Each has one job.
+Five repositories are in scope for this distribution. The first three are upstream; the last two are vendor-owned. Each has one job.
 
-### 3.1 `evo-core` (upstream)
+### 3.1 `evo-core` (framework upstream)
 
--   Role: the framework. Source and engineering docs. Tagged releases.
--   Location: `github.com/foonerd/evo-core`, pinned at `v0.1.9`.
--   What the distribution does with it: clones at the pinned tag during builds. Never modifies.
+-   Role: the framework. Source, engineering docs, tagged releases, and signed per-arch binaries.
+-   Location: `github.com/foonerd/evo-core`, pinned at the chosen framework tag.
+-   What the distribution does with it: depends on it (via the SDK pin in `Cargo.toml`); admits its signed binaries by fetching from the framework artefacts plane. Never modifies.
 
-### 3.2 `evo-device-volumio` (this repository)
+### 3.2 `evo-core-artefacts` (framework release plane)
+
+-   Role: the framework's signed binary artefacts plane. Every framework byte a device ever pulls lives here.
+-   Location: `github.com/foonerd/evo-core-artefacts`.
+-   Contents: per-arch `evo` and `evo-plugin-tool` binaries, signatures, build-info manifests, per-version metadata.
+-   What the distribution does with it: fetches the steward and tooling binaries during build/install, verifies the framework signature, hands them to packaging.
+
+### 3.3 `evo-device-audio` (reference generic device upstream)
+
+-   Role: the audio-domain reference generic device. Source, engineering docs, and signed plugin bundles for the brand-neutral audio plugins (MPD playback, ALSA composition, file-tag metadata, local artwork).
+-   Location: `github.com/foonerd/evo-device-audio` and the companion `github.com/foonerd/evo-device-audio-artefacts`.
+-   What the distribution does with it: admits the reference plugins by name in its catalogue, fetches their signed bundles from the audio artefacts plane, never modifies the plugins themselves. Vendor-specific plugins are authored separately in this repo.
+
+### 3.4 `evo-device-volumio` (this repository, vendor source)
 
 -   Role: distribution source. Everything a human writes and edits for this distribution.
 -   Location: `github.com/foonerd/evo-device-volumio`.
--   Contents: Rust source for plugins, catalogue TOML, branding assets, trust material public halves, documentation, and the build and release workflow files.
--   What lives elsewhere: no compiled binaries, no release artefacts, no copies of upstream sources.
+-   Contents: the Volumio catalogue TOML, Rust source for any Volumio-specific plugins, branding assets, trust material public halves, documentation, and the build and release workflow files.
+-   What lives elsewhere: no compiled binaries, no release artefacts, no copies of upstream sources, no copies of the reference audio plugins.
 
-### 3.3 `evo-device-volumio-artefacts` (the vendor's release plane)
+### 3.5 `evo-device-volumio-artefacts` (vendor release plane)
 
--   Role: the artefacts plane. Every byte a device ever pulls lives here.
+-   Role: the vendor's signed artefacts plane. Every byte a Volumio device ever pulls that originated from this vendor lives here.
 -   Location: `github.com/foonerd/evo-device-volumio-artefacts`.
--   Contents: compiled binaries, manifests, signatures, per-version metadata. Structured by channel (`dev`, `test`, `prod`) and by piece.
--   Why separate: release timing is independent of development. Editing documentation in the source repo does not touch release assets. The device-facing surface is cleanly versioned and does not churn with source edits.
+-   Contents: Volumio-specific plugin binaries, manifests, signatures, per-version metadata. Structured by channel (`dev`, `test`, `prod`) and by piece.
+-   Why separate from the source repo: release timing is independent of development. Editing documentation in the source repo does not touch release assets. The device-facing surface is cleanly versioned and does not churn with source edits.
 
-### 3.4 The pattern for future distributions
+### 3.6 The pattern for future vendor distributions
 
-One source repo `evo-device-<brand>`, one artefacts repo `evo-device-<brand>-artefacts`, both owned by the same actor.
+One source repo `evo-device-<brand>`, one artefacts repo `evo-device-<brand>-artefacts`, both owned by the vendor. The framework + framework artefacts repo + reference generic device + reference generic device's artefacts repo are upstream of every vendor distribution and shared across them.
 
 ## 4. The distribution as a set of pieces
 
