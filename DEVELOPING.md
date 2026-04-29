@@ -191,8 +191,9 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 16 | Happenings coalescing | **Not used in v0.** Volumio frontend handles `CustodyStateReported` bursts client-side. |
 | 17 | Subject-grammar orphan migration verb | **Not surfaced.** Framework handles internally; no Volumio operator tooling consumes the verb. |
 | 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces these in the operator panel for distribution updates without full steward restart. |
+| 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
 
-This table is the source of truth for Volumio's distribution-side posture. Items 6 through 18 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
+This table is the source of truth for Volumio's distribution-side posture. Items 6 through 19 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
 
 ### User Interaction Routing — Volumio specifics
 
@@ -234,6 +235,87 @@ The unknown-type fallback ("your client is out of date") renders for any prompt 
 In v0 of this distribution, Volumio's own plugins (Volumio-specific metadata pipeline integration, future Volumio-specific bridge-style plugins) inherit the canonical contract from evo-device-audio. None ship in this repository today; the section above is the contract that any future Volumio-specific plugin issuing prompts honours.
 
 **Search and other consumer-initiated queries** (browse the library, queue a track, change volume via the UI control, list available outputs) are NOT prompts. They use the standard `op = "request"` against the relevant plugin's shelf — the Volumio frontend's existing query surfaces translate to `request` ops, not `request_user_interaction`.
+
+### Time and Clock Trust — Volumio specifics
+
+The canonical statement of the framework / distribution split for time-trust lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#time-and-clock-trust--distribution-and-plugin-implications). Volumio's specifics:
+
+**NTP daemon and configuration:**
+
+Volumio ships **chrony** as the NTP client. systemd-timesyncd is disabled in the Debian package postinst (it is replaced, not parallel-running). Chrony's default config uses the public `pool.ntp.org` cluster (`2.debian.pool.ntp.org`, `2.pool.ntp.org`) plus optional region-specific overrides via `/etc/evo/chrony.d/region.conf` for distributions targeting specific markets. Sync triggers: cold start, reboot, NetworkManager `connectivity-up` dispatcher hook (chrony's `online`/`offline` commands), and chrony's own periodic re-poll every 64–1024s per default tuning.
+
+For RTC-equipped targets (Pi 5 + battery, Pi 4 + PiRTC HAT, x86 boards with CMOS RTC), chrony is configured with `rtcautotrim 30` so it writes back to the hardware RTC every 30 minutes when synced — keeping cold-start trust accurate within a few seconds.
+
+For no-RTC targets (stock Pi 3 / Pi 4 / Pi Zero — the dominant install base today), chrony is configured with aggressive first-sync (`makestep 1.0 3` — step the clock immediately on the first 3 sync attempts after start, regardless of drift size) so the device reaches `Trusted` state as quickly as possible after boot or wake.
+
+**`evo.toml` declarations:**
+
+Per-target `evo.toml` (shipped via the Debian package's `/etc/evo/evo.toml.<target>` overlay):
+
+```toml
+# Pi 5
+[time_trust]
+has_battery_rtc = true
+max_acceptable_staleness_ms = 86400000     # 24h
+
+# Stock Pi 4 / Pi 3 / Pi Zero
+[time_trust]
+has_battery_rtc = false
+max_acceptable_staleness_ms = 86400000
+sync_minimum_ms = 30000                     # chrony reaches sync within 30s post-wake
+```
+
+**Power warden RTC integration:**
+
+Volumio's power warden (`com.volumio.system.power`, Debian-systemd-based) implements:
+
+-   On RTC-equipped targets: `program_rtc_wake(at: SystemTime)` writes the wake time to `/sys/class/rtc/rtc0/wakealarm` and registers the framework's wake callback with `systemctl set-property` for the suspend transition.
+-   On no-RTC targets: refuses `must_wake_device: true` appointments at create time when `wake_pre_arm_ms < sync_minimum_ms` (30s default). Falls back to "stay-awake mode" for short suspend windows where RTC wake is unavailable.
+
+**Volumio plugins requiring synced time:**
+
+| Plugin | `requires_synced_time` | `synced_time_tolerance_ms` |
+| --- | --- | --- |
+| `org.evoframework.playback.mpd` (audio reference) | `false` | (n/a) |
+| `org.evoframework.metadata.local` (audio reference) | `false` | (n/a) |
+| `org.evoframework.artwork.local` (audio reference) | `false` | (n/a) |
+| Volumio-specific Spotify integration (planned) | `true` | 5000 (5s tolerance for OAuth refresh windows) |
+| Volumio-specific Tidal integration (planned) | `true` | 5000 |
+| Volumio-specific multi-room sync (planned) | `true` | 100 (100ms for AirPlay-class sync) |
+
+Audio reference plugins do not require synced time — local file playback and local metadata work regardless. Streaming-source plugins (Spotify, Tidal, similar) declare `requires_synced_time` for OAuth refresh-window correctness. Multi-room audio sync requires sub-second precision.
+
+**Frontend rendering of trust state:**
+
+Volumio's web frontend renders an "untrusted clock" banner across the top of the screen when `clock_trust ∈ {Untrusted, Stale}`, with a one-line reason ("device just booted; awaiting network time sync" / "device clock has not synced for over 24h"). On `Trusted` the banner disappears.
+
+Time-stamped wire frames carry a `clock_trust` annotation the frontend uses to gray out historical entries from `Untrusted`-stamped events.
+
+### Appointments — Volumio specifics
+
+The canonical statement of the appointments contract lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#appointments--implications-for-plugins-and-ui). Volumio's specifics:
+
+**Alarm clock plugin home:**
+
+The alarm-clock plugin is brand-neutral and lives in the audio reference (`org.evoframework.alarm` in `evo-device-audio`). Volumio inherits it unchanged via the catalogue admission. No Volumio-specific alarm-clock plugin needed; the canonical implementation handles the multi-period day schedule (morning, midday, workout, podcast, evening, prep-for-sleep) any audio distribution operator wants.
+
+**Volumio-specific alarm-plugin operator config:**
+
+Volumio's Debian package ships a default `/etc/evo/plugins.d/org.evoframework.alarm.toml` with no alarms (empty `[[alarms]]` array). Volumio's web frontend writes the operator's chosen alarms to this file on save; the alarm plugin's `reload_plugin` admission verb picks up the changes without a steward restart.
+
+The frontend's alarm-management UI renders the per-day schedule the user describes (per-day-of-week different times) as one logical "morning alarm" with a per-day editor, but stores it as multiple TOML entries — one per distinct fire time. The frontend reads back the multiple entries on next render and reconstructs the logical view.
+
+**Calendar integration (future):**
+
+A Volumio-specific Google Calendar / Outlook bridge plugin is on the v0.1.13+ roadmap — not in v0 of this distribution. The canonical bridge pattern (audio reference's documentation) is the implementation guide when the integration ships.
+
+**Power warden integration:**
+
+The user's day-schedule pattern (sleep at 23:00, wake at 06:30 via RTC) routes through the alarm plugin → `system.power.suspend` (for sleep) and the framework's RTC-wake programming (for the 06:30 wake). Volumio's power warden owns this end-to-end on the distribution side; the alarm plugin just dispatches the standard `request` ops.
+
+**Operator-config schema vendor extensions:**
+
+Volumio reserves the namespace `[[alarms.volumio]]` for Volumio-specific alarm fields the canonical schema doesn't cover (e.g., custom Volumio sound-preset references, Volumio-frontend-rendering hints). The audio reference's alarm plugin ignores fields outside the canonical schema; Volumio-specific extensions are read by Volumio-specific tooling only.
 
 ## Upgrading the evo-core pin
 
