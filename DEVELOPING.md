@@ -194,6 +194,47 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 
 This table is the source of truth for Volumio's distribution-side posture. Items 6 through 18 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
 
+### User Interaction Routing — Volumio specifics
+
+The canonical statement of how plugins issue prompts and how consumer surfaces render them lives in [evo-device-audio's `DEVELOPING.md`](https://github.com/foonerd/evo-device-audio/blob/main/DEVELOPING.md#user-interaction-routing--implications-for-plugins-and-ui). Volumio's specifics:
+
+**Volumio plugins issuing prompts:**
+
+The Volumio frontend currently surfaces auth flows for streaming sources (Spotify, Tidal, YouTube Music when present), the network configuration wizard (WiFi SSID + password + captive-portal), the NAS mount credentials dialog, and the API-key dialogs for any third-party integration plugin. Each of these maps onto one or more prompt types from the closed vocabulary:
+
+| Volumio user flow | Prompt types involved |
+| --- | --- |
+| Streaming-source OAuth (YouTube Music, Tidal) | `external_redirect` |
+| Streaming-source email + password (legacy Tidal, others) | `multi_field` (text + password + confirm) with `retention_hint = until_revoked` |
+| WiFi network setup | `select_with_other` → optional `select` (security type) → `password` → optional `external_redirect` (captive portal) |
+| Static IP configuration | `select` (interface) → `select` (DHCP / static) → `multi_field` (IP / netmask / gateway / DNS) with re-prompt on validation failure |
+| NAS mount credentials | `multi_field` (server + share + username + password) with `retention_hint = until_revoked` |
+| Weather / streaming-rate-info API keys | `text` with validation hint, `retention_hint = until_revoked` |
+
+Plugin authors targeting Volumio-specific shelves (under `com.volumio.*`) follow the canonical contract; nothing Volumio-specific changes the prompt vocabulary.
+
+**Volumio consumer surfaces (responder capability):**
+
+Volumio's web frontend (Vue.js) holds the `user_interaction_responder` capability by default. The `client_acl.toml` shipped with the Volumio Debian package grants it to the local Unix-socket peer running the frontend's bridge process. Other consumers (a future MQTT bridge, a CLI admin tool) connect without the responder capability and observe pending prompts as subjects via `list_subjects` / `subscribe_subject` but do not answer them.
+
+Volumio's frontend renderer covers all ten prompt types per the canonical contract:
+
+-   `text`, `password` — standard form fields with the existing Volumio password-strength + reveal-toggle affordances.
+-   `select`, `select_with_other`, `multi_select` — Vuetify selects + free-text override.
+-   `confirm` — modal confirmation dialog matching Volumio's existing destructive-action confirm pattern.
+-   `multi_field` — multi-step modal grouped by `session_id`; pre-fills from `previous_answer` on re-prompt; renders `error_context` inline above the affected fields.
+-   `external_redirect` — opens the URL in a new browser tab (web frontend) or embedded webview (kiosk-class Pi deployments without a browser); polls until the callback URL pattern matches; extracts the response per the prompt's `expected_response`.
+-   `datetime` — Vuetify date / time picker.
+-   `freeform` — fallback rendering: surfaces the `mime_type` + a generic input area; consumer logs that a vendor-specific prompt type may need extension.
+
+The unknown-type fallback ("your client is out of date") renders for any prompt type the frontend does not recognise. Volumio frontend version pins follow the evo-core tag pin; an out-of-date frontend against a newer steward sees the fallback rather than crashing.
+
+**Volumio plugins ON the Volumio side that initiate prompts:**
+
+In v0 of this distribution, Volumio's own plugins (Volumio-specific metadata pipeline integration, future Volumio-specific bridge-style plugins) inherit the canonical contract from evo-device-audio. None ship in this repository today; the section above is the contract that any future Volumio-specific plugin issuing prompts honours.
+
+**Search and other consumer-initiated queries** (browse the library, queue a track, change volume via the UI control, list available outputs) are NOT prompts. They use the standard `op = "request"` against the relevant plugin's shelf — the Volumio frontend's existing query surfaces translate to `request` ops, not `request_user_interaction`.
+
 ## Upgrading the evo-core pin
 
 1.  Verify the new evo-core tag is green (`cargo test --workspace` in evo-core).
