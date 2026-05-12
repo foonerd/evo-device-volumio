@@ -4,6 +4,14 @@
 *.swp
 *~
 
+# `evo-sdk-gen` from evo-core-eng writes its per-language outputs
+# to `./sdks/` relative to the invoking cwd. Stray runs from this
+# tree should not pollute the repo; ignore them symmetrically with
+# evo-core-eng's own /sdks/ rule. The shell vendoring path lives
+# in evo-ui-eng/apps/evo-ui-shell/src/sdk/ and tracks a deliberate
+# snapshot.
+/sdks/
+
 # AI tooling — never committed.
 #
 # Excludes per-machine settings, project memories, caches, and
