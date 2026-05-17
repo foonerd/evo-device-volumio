@@ -78,7 +78,7 @@ For development runs, expect `allow_unsigned = true` in a local `evo.toml`. Prod
 
 ## Boundary discipline
 
-Three repository tiers per ADR-0032 (supersedes ADR-0026):
+Three repository tiers:
 
 This repository is the **vendor distribution** tier. It holds material specific to the Volumio brand:
 
