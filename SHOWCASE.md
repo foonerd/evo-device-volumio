@@ -163,7 +163,7 @@ The framework does not sign for devices. An `evo-core` release tag is a source-p
 
 Revocation paths exist at every level: vendor revokes a compromised version; operator revokes a vendor key locally; framework-side enrollment revocation for vendors who break the vendor contract. These are concept-level pathways; specific mechanisms land when they are needed.
 
-Two questions deliberately left open: one vendor key for the whole distribution vs. per-piece keys; single-trigger vs. two-person promotion authorisation. Both deferred until a reason to settle them appears.
+Two questions deliberately left open: one vendor key for the whole distribution vs. per-piece keys; single-trigger vs. two-person promotion authorisation. Both stay open until a reason to settle them appears.
 
 ## 11. The POC path for this distribution
 
@@ -179,21 +179,21 @@ The seven-step pattern, with this distribution's answers:
 
 A future `evo-device-<brand>` reads this section, substitutes their minimum and their target, and has a plan.
 
-## 12. Deferred concerns
+## 12. Concerns not currently addressed
 
-These are real concerns, deferred because they belong to a later phase or because naming them earlier would have been roof-before-foundation.
+These are real concerns, not addressed yet because they belong to a later phase or because naming them earlier would have been roof-before-foundation.
 
 -   The manifest schema on the artefact plane (what a device fetches to discover what is available and which version is on which channel). Lands when the first workflow writes one.
 -   Manifest signing discipline (per-artefact, per-manifest, or both).
 -   Freshness window length for manifests.
 -   The update operation as observed by the device (`CHECK`, `OFFER`, `APPLY` phases and the local inventory the device maintains). Relevant once devices exist to update.
 -   Plural sources on a device. The distribution currently has one source (its own artefacts repo). The fabric's sources concept supports more; adding is additive when a reason arises.
--   An apt repository as an additional source channel. Viable; deferred until GitHub Releases as a source works end-to-end.
--   A prepared SD-card image. Convenience over "stock Pi OS Lite plus install step". Deferred until there is a user population that cannot or should not follow the install step.
+-   An apt repository as an additional source channel. Viable; lands when GitHub Releases as a source works end-to-end.
+-   A prepared SD-card image. Convenience over "stock Pi OS Lite plus install step". Lands when there is a user population that cannot or should not follow the install step.
 -   Continuous integration beyond the build and release workflows. Arrives when there is more than one plugin crate to coordinate.
 -   Cross-architecture support beyond `aarch64`.
 
-Each deferred item is named so the deferral is deliberate, not forgotten.
+Each item is named so leaving it for later is deliberate, not forgotten.
 
 ## 13. For future distributions
 

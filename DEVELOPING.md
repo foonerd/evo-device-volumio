@@ -178,23 +178,23 @@ The canonical inventory of items an audio distribution must triage lives in [evo
 | 3 | Network sandboxing | **Applied per trust class** (table above). |
 | 4 | Filesystem scopes | **Applied per trust class** (table above). |
 | 5 | Empty-catalogue refusal | **Not implemented.** Volumio accepts the framework's "starts anyway" default; the postinst does not refuse install of an empty catalogue. May add if a real failure mode surfaces. |
-| 6 | Plugins administration operator verbs | **Wires consumer in v0.1.12**. Volumio frontend surfaces enable / disable / uninstall / purge as operator-facing controls in the device admin panel. |
-| 7 | Flight mode device plugin | **Wires consumer in v0.1.12**. Concrete hardware-control plugin authored if and when Volumio expands to targets with vendor-managed Bluetooth / cellular radios. Current Volumio targets (Pi 4 / Pi 5 + USB DAC, x86 + onboard audio) expose no controllable radios under Volumio's management; OS-level network manager handles WiFi / Ethernet. |
-| 8 | User Interaction Routing | **Wires consumer in v0.1.12**. Volumio frontend surfaces auth-flow prompts (Spotify, Tidal, NAS credentials) as modal dialogs. |
+| 6 | Plugins administration operator verbs | **Wires consumer in a prior release**. Volumio frontend surfaces enable / disable / uninstall / purge as operator-facing controls in the device admin panel. |
+| 7 | Flight mode device plugin | **Wires consumer in a prior release**. Concrete hardware-control plugin authored if and when Volumio expands to targets with vendor-managed Bluetooth / cellular radios. Current Volumio targets (Pi 4 / Pi 5 + USB DAC, x86 + onboard audio) expose no controllable radios under Volumio's management; OS-level network manager handles WiFi / Ethernet. |
+| 8 | User Interaction Routing | **Wires consumer in a prior release**. Volumio frontend surfaces auth-flow prompts (Spotify, Tidal, NAS credentials) as modal dialogs. |
 | 9 | Appointments rack | **Not used in v0.** No time-driven Volumio plugins; future "scheduled playback" feature would consume. |
-| 10 | Watches rack | **Wires consumer in v0.1.12** for audio-path-switching scenarios. Volumio ships pre-configured watches for HDMI ARC handover, Bluetooth peer connect / disconnect, 3.5mm jack insertion (where hardware exposes it via ALSA jack-detect), and USB DAC plug events. Sensor / hardware-event plugins (CEC, BT peer manager, USB enumerator) are Volumio-authored under `com.volumio.sensor.*` namespace. |
-| 11 | Fast Path | **Wires consumer in v0.1.12**. Volumio frontend uses Fast Path for transport ops (volume, pause, seek) where latency budgets matter. |
-| 12 | Steward Reconciliation Loop | **Wires consumer in v0.1.12**. Volumio's `composition.alsa` → `delivery.alsa` pipeline composes on the framework reconciliation surface. |
+| 10 | Watches rack | **Wires consumer in a prior release** for audio-path-switching scenarios. Volumio ships pre-configured watches for HDMI ARC handover, Bluetooth peer connect / disconnect, 3.5mm jack insertion (where hardware exposes it via ALSA jack-detect), and USB DAC plug events. Sensor / hardware-event plugins (CEC, BT peer manager, USB enumerator) are Volumio-authored under `com.volumio.sensor.*` namespace. |
+| 11 | Fast Path | **Wires consumer in a prior release**. Volumio frontend uses Fast Path for transport ops (volume, pause, seek) where latency budgets matter. |
+| 12 | Steward Reconciliation Loop | **Wires consumer in a prior release**. Volumio's `composition.alsa` → `delivery.alsa` pipeline composes on the framework reconciliation surface. |
 | 13 | Catalogue corruption resilience | **Inherited transparently.** Volumio packaging does not pre-seed `catalogue.lkg.toml`; the framework's three-tier fallback is sufficient. |
 | 14 | CBOR codec | **Not used.** Volumio frontend (Vue.js) and bridge surfaces use JSON. |
-| 15 | Hot-reload `Live` mode | **Wires consumer in v0.1.12** for in-process plugins where catalogue / operator-config reload should not drop runtime state (alarm-plugin pending alarms, library-scanner progress, metadata-cache contents). For OOP streaming-source plugins (planned Spotify, Tidal): Live mode is the schema-migration recovery path on plugin version bumps. Volumio's audio.delivery / audio.composition wardens stay on Restart — hardware-bound ALSA state is owned by Volumio's separate ALSA daemon (systemd-managed), not by the plugin code; warden-architecture-pattern preserves the audio pipeline across plugin reload without framework-side fd-passing. |
-| 16 | Happenings coalescing | **Wires consumer in v0.1.12.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
-| 17 | Subject-grammar orphan migration verb | **Wires consumer in v0.1.12.** Volumio frontend admin panel adds a "Catalogue grammar" view that surfaces pending grammar orphans (calls `list_grammar_orphans` on view-open and at a 60s polling interval); migration form uses dry-run-then-confirm flow; defaults `mode = "background"` for plans with `would_migrate > 1000` (Volumio's typical music library on Pi 4 / Pi 5 ranges 5k-50k tracks; NAS-backed libraries reach 200k+). Migration commands are also exposed via `volumio system grammar` CLI for SSH operators. Volumio's downstream catalogue releases document any subject-type changes in their release notes alongside the operator command. |
-| 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in v0.1.12.** Volumio frontend admin panel surfaces both verbs under a "Distribution updates" section. Volumio's `volumio system reload` CLI subcommand group wraps them for SSH operators. Volumio's apt-based update pipeline (postinst hook on `.deb` install) calls the verbs sequentially after package install completes — no steward restart needed for catalogue / manifest rollouts. Volumio's downstream catalogue release notes document any required `--allow-cardinality-divergence` opt-ins or pre-cleanup steps. |
-| 19 | Time and Clock Trust | **Wires distribution in v0.1.12.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
-| 20 | Runtime capabilities + version-skew policy | **Wires distribution in v0.1.12.** Every Volumio-authored warden and respondent declares its `course_correct_verbs` (wardens) and `client_request_verbs` (respondents) in its manifest before v0.1.12 release. Volumio's CI integrates the new `evo-plugin-test` crate's `assert_manifest_matches_describe` helper as a mandatory unit test in every Volumio plugin crate. Volumio's plugin sign pipeline runs `evo-plugin-tool verify` as a release-blocking step. Volumio's plugins set `evo_min_version` to the **oldest** framework version they actually require (not the version they happen to be building against), giving downstream operators on long-life devices the maximum compatible deployment window before the K8s-style skew policy forces a refresh. |
+| 15 | Hot-reload `Live` mode | **Wires consumer in a prior release** for in-process plugins where catalogue / operator-config reload should not drop runtime state (alarm-plugin pending alarms, library-scanner progress, metadata-cache contents). For OOP streaming-source plugins (planned Spotify, Tidal): Live mode is the schema-migration recovery path on plugin version bumps. Volumio's audio.delivery / audio.composition wardens stay on Restart — hardware-bound ALSA state is owned by Volumio's separate ALSA daemon (systemd-managed), not by the plugin code; warden-architecture-pattern preserves the audio pipeline across plugin reload without framework-side fd-passing. |
+| 16 | Happenings coalescing | **Wires consumer in a prior release.** Volumio frontend declares per-subscription coalesce label lists for the high-rate streams it consumes (per-handle `CustodyStateReported` for the position-update meter, per-subject collapse for "now playing" updates, per-watch fire for hardware-event indicators). Volumio's sensor plugins emit through the new `Happening::PluginEvent` variant; consumers subscribing to sensor streams coalesce on payload-flattened labels (e.g., `sensor_id`). |
+| 17 | Subject-grammar orphan migration verb | **Wires consumer in a prior release.** Volumio frontend admin panel adds a "Catalogue grammar" view that surfaces pending grammar orphans (calls `list_grammar_orphans` on view-open and at a 60s polling interval); migration form uses dry-run-then-confirm flow; defaults `mode = "background"` for plans with `would_migrate > 1000` (Volumio's typical music library on Pi 4 / Pi 5 ranges 5k-50k tracks; NAS-backed libraries reach 200k+). Migration commands are also exposed via `volumio system grammar` CLI for SSH operators. Volumio's downstream catalogue releases document any subject-type changes in their release notes alongside the operator command. |
+| 18 | Reload-catalogue / reload-manifest operator verbs | **Wires consumer in a prior release.** Volumio frontend admin panel surfaces both verbs under a "Distribution updates" section. Volumio's `volumio system reload` CLI subcommand group wraps them for SSH operators. Volumio's apt-based update pipeline (postinst hook on `.deb` install) calls the verbs sequentially after package install completes — no steward restart needed for catalogue / manifest rollouts. Volumio's downstream catalogue release notes document any required `--allow-cardinality-divergence` opt-ins or pre-cleanup steps. |
+| 19 | Time and Clock Trust | **Wires distribution in a prior release.** Volumio ships chrony as the NTP client (replacing systemd-timesyncd in newer Volumio releases for better drift handling and richer status surface). The Volumio Debian package's chrony config uses the public `pool.ntp.org` cluster as the default NTP source, with the operator's `client_acl.toml` allowing override. Per-target `evo.toml` declares `has_battery_rtc`: `true` for Pi 5 + battery-equipped Pi 4 with PiRTC HAT; `false` for stock Pi 3 / Pi 4 / Pi Zero (the dominant install base). Volumio's power warden (Debian-systemd-based) implements the RTC-wake callback for Pi 5; on no-RTC targets, the warden refuses appointments with `must_wake_device: true` and `wake_pre_arm_ms` below the chrony-determined sync minimum. |
+| 20 | Runtime capabilities + version-skew policy | **Wires distribution in a prior release.** Every Volumio-authored warden and respondent declares its `course_correct_verbs` (wardens) and `client_request_verbs` (respondents) in its manifest before the targeted framework release. Volumio's CI integrates the new `evo-plugin-test` crate's `assert_manifest_matches_describe` helper as a mandatory unit test in every Volumio plugin crate. Volumio's plugin sign pipeline runs `evo-plugin-tool verify` as a release-blocking step. Volumio's plugins set `evo_min_version` to the **oldest** framework version they actually require (not the version they happen to be building against), giving downstream operators on long-life devices the maximum compatible deployment window before the K8s-style skew policy forces a refresh. |
 
-This table is the source of truth for Volumio's distribution-side posture. Items 6 through 20 land in evo-core v0.1.12. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in v0.1.12" prefix flips to "**Applied.**" in the same commit that wires the consumer.
+This table is the source of truth for Volumio's distribution-side posture. Items 6 through 20 are landed in prior framework releases. As each ships and Volumio wires the consumer, the corresponding row's "Wires consumer in a prior release" prefix flips to "**Applied.**" in the same commit that wires the consumer.
 
 ### User Interaction Routing — Volumio specifics
 
@@ -308,7 +308,7 @@ The frontend's alarm-management UI renders the per-day schedule the user describ
 
 **Calendar integration (future):**
 
-A Volumio-specific Google Calendar / Outlook bridge plugin is on the v0.1.13+ roadmap — not in v0 of this distribution. The canonical bridge pattern (audio reference's documentation) is the implementation guide when the integration ships.
+A Volumio-specific Google Calendar / Outlook bridge plugin is on the future roadmap — not in v0 of this distribution. The canonical bridge pattern (audio reference's documentation) is the implementation guide when the integration ships.
 
 **Power warden integration:**
 
@@ -398,7 +398,7 @@ Each Volumio sensor plugin emits `Happening::PluginEvent { plugin: "com.volumio.
 
 These payload schemas are part of Volumio's public plugin contract; consumer surfaces (frontend, MQTT bridge) build coalesce configs against them. Volumio's plugin-author guide (separate doc, future) captures the schema versioning rule: payload fields can be added without breaking consumers; renames or removals require a coordinated frontend update.
 
-**Volumio MQTT bridge (planned v0.1.13+):**
+**Volumio MQTT bridge (planned future release):**
 
 A future Volumio MQTT bridge plugin will translate the coalesced subscriptions to MQTT topics. Coarse-grained subscriptions (per-subject, per-handle) become low-frequency MQTT publishes; fine-grained subscriptions (forensic, per-individual-fire) stay on the Unix-socket path. The bridge declares its own coalesce configs per topic; the framework's per-subscriber coalescing means the bridge's downstream rate is decoupled from the bus's emission rate.
 
@@ -418,7 +418,7 @@ The canonical statement of hot-reload Live mode contract lives in [evo-device-au
 | `org.evoframework.metadata.local` (audio reference) | Yes (in-process) | Metadata cache + in-flight scan progress preserved across catalogue reload. |
 | `org.evoframework.artwork.local` (audio reference) | Yes (in-process) | Artwork cache preserved across config reload. |
 | `org.evoframework.playback.mpd` (audio reference, OOP-shaped) | Restart only | Hardware-bound state (the live MPD socket connection + ALSA pipeline) is owned by the MPD daemon (Volumio's existing systemd-managed `mpd.service`), not by the plugin code. Plugin-process restart reconnects to the running MPD; ALSA state preserved by MPD's continuity. |
-| `org.evoframework.composition.alsa` (audio reference, future v0.1.12+) | Restart only | Hardware-bound state owned by Volumio's ALSA daemon (separate process); plugin reload reconnects. |
+| `org.evoframework.composition.alsa` (audio reference, future framework release) | Restart only | Hardware-bound state owned by Volumio's ALSA daemon (separate process); plugin reload reconnects. |
 | `com.volumio.streaming.spotify` (planned) | Yes (OOP, Live for schema migration) | Schema-migration recovery for OAuth refresh-token format changes between plugin versions; Live used on update specifically. Default install / update uses Restart. |
 | `com.volumio.streaming.tidal` (planned) | Yes (OOP, Live for schema migration) | Same shape as Spotify. |
 | `com.volumio.sensor.*` (cec, bt_peer, alsa_jack, cpu_temp, etc.) | Restart only | Sensor state is the kernel's; nothing for the plugin to hand over. Re-spawn re-reads kernel state. |
@@ -448,7 +448,7 @@ The plugin code (`org.evoframework.playback.mpd`) speaks the MPD wire protocol t
 
 This is the warden-architecture-pattern in action: the resource owner (`mpd.service`) outlives the reloadable plugin code (`org.evoframework.playback.mpd` plugin process). Live mode + framework-side state handover would not be needed even if the framework supported it; the architecture handles preservation outside the framework's hot-reload primitive.
 
-**For the planned com.volumio.composition.alsa (v0.1.12+):**
+**For the planned com.volumio.composition.alsa (future release):**
 
 Volumio plans a separate ALSA-management daemon (`volumio-alsa-bridge`, systemd-managed) that owns the multi-stream ALSA pipeline state. The composition plugin in evo-core speaks a per-vendor wire protocol to this bridge daemon; plugin reload (Restart) reconnects without disturbing the live pipeline. Same warden-architecture-pattern.
 
@@ -472,12 +472,12 @@ The canonical statement of the warden capability gate, three-tier manifest-drift
 
 **Volumio warden `course_correct_verbs` declarations:**
 
-Every Volumio-authored warden gains its manifest declaration before v0.1.12 release; same shape as the audio reference's tables. Volumio additions on top of the audio reference set:
+Every Volumio-authored warden gains its manifest declaration before the targeted framework release; same shape as the audio reference's tables. Volumio additions on top of the audio reference set:
 
 | Warden | Volumio-declared `course_correct_verbs` |
 | --- | --- |
 | `com.volumio.audio.frontend` (operator-config respondent / coordinator) | (respondent surface — uses `client_request_verbs` instead) |
-| `com.volumio.composition.alsa` (planned, v0.1.12+) | `["apply_pipeline", "add_processor", "remove_processor", "set_sample_rate", "set_channels", "set_buffer_size"]` |
+| `com.volumio.composition.alsa` (planned) | `["apply_pipeline", "add_processor", "remove_processor", "set_sample_rate", "set_channels", "set_buffer_size"]` |
 | `com.volumio.power` (Debian-systemd power warden) | `["request_sleep", "request_shutdown", "request_reboot", "schedule_wake", "cancel_wake", "set_dim_level"]` |
 | `com.volumio.network` (where Volumio manages WiFi / Ethernet) | `["set_wifi_credentials", "scan_networks", "set_static_ip", "release_dhcp", "renew_dhcp"]` |
 | `com.volumio.streaming.spotify` (planned) | `["start_playback", "stop_playback", "transfer_playback", "refresh_token"]` |
@@ -500,10 +500,10 @@ The list is per-warden and stable across plugin releases except by deliberate pl
 | `com.volumio.audio.frontend` | Set to oldest framework version that satisfies the plugin's actual feature dependencies (not the version available at build time). Lets long-life Volumio installations on slow-update tracks keep working through the framework's two-cycle grace window. |
 | `com.volumio.power` | Same. |
 | `com.volumio.network` | Same. |
-| `com.volumio.composition.alsa` | Targeted at v0.1.12 features (warden-side capability gate, fast-path, watches consumer integration); declares `evo_min_version = "0.1.12"`. |
-| `com.volumio.streaming.spotify` | Will be authored against the v0.1.12 user-interaction-routing surface; declares `evo_min_version = "0.1.12"`. |
+| `com.volumio.composition.alsa` | Targeted at the targeted-release features (warden-side capability gate, fast-path, watches consumer integration); declares `evo_min_version = "0.1.12"`. |
+| `com.volumio.streaming.spotify` | Will be authored against the a prior release user-interaction-routing surface; declares `evo_min_version = "0.1.12"`. |
 | `com.volumio.streaming.tidal` | Same. |
-| `com.volumio.sensor.*` (cec, bt_peer, alsa_jack, usb_audio_enumerator, cpu_temp, network_state) | Declares `evo_min_version = "0.1.12"` because each sensor plugin emits via `Happening::PluginEvent` (introduced in v0.1.12). |
+| `com.volumio.sensor.*` (cec, bt_peer, alsa_jack, usb_audio_enumerator, cpu_temp, network_state) | Declares `evo_min_version = "0.1.12"` because each sensor plugin emits via `Happening::PluginEvent` (introduced in a prior release). |
 
 **Operator-visible skew warnings:**
 
@@ -511,7 +511,7 @@ The Volumio frontend's plugin admin panel renders a warning badge next to any pl
 
 **`PluginVersionSkewWarning` consumer:**
 
-Volumio's frontend subscribes to `Happening::PluginVersionSkewWarning` (variant introduced in v0.1.12) and uses the stream as the data source for the admin panel's badge state. The subscription declares coalesce labels `["variant", "plugin"]` to collapse repeated re-emissions of the same warning to a single UI update.
+Volumio's frontend subscribes to `Happening::PluginVersionSkewWarning` (variant introduced in a prior release) and uses the stream as the data source for the admin panel's badge state. The subscription declares coalesce labels `["variant", "plugin"]` to collapse repeated re-emissions of the same warning to a single UI update.
 
 ### Subject-grammar orphan migration — Volumio specifics
 
@@ -569,7 +569,7 @@ When Volumio's vendor catalogue introduces a subject-type rename or split — fo
 | --- | --- | --- |
 | Frontend "now-migrating" indicator | `variants: ["grammar_migration_progress"]` filtered by current `migration_id` | None (per-batch is already the right granularity) |
 | Frontend completed-counter widget | `variants: ["subject_migrated"]` | `["variant", "from_type", "to_type", "migration_id"]` (collapses to one event per from_type/to_type pair) |
-| Future MQTT bridge (planned v0.1.13+) | `variants: ["grammar_migration_progress"]` only | `["variant", "migration_id"]` (one event per migration regardless of batch count) |
+| Future MQTT bridge (planned future release) | `variants: ["grammar_migration_progress"]` only | `["variant", "migration_id"]` (one event per migration regardless of batch count) |
 | Audit log (forensic) | `variants: ["subject_migrated"]` | None — every per-subject event preserved at fidelity |
 
 **Volumio's `pending_grammar_orphans` boot-time observability:**
@@ -657,7 +657,7 @@ If a Volumio catalogue update tightens cardinality and operator opts into `allow
 
 **Volumio's reload monitoring dashboard:**
 
-Future Volumio MQTT bridge (planned v0.1.13+) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
+Future Volumio MQTT bridge (planned future release) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
 
 ### Catalogue schemas — Volumio specifics
 

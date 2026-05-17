@@ -77,7 +77,7 @@ The detailed shape is in `SHOWCASE.md` section 7. The promotion workflow, when c
 
 Scripts are pieces. They get signed like any other piece once the broader signing discipline is in place. A device that runs an unsigned `bootstrap.sh` fetched over the network has a trust hole the rest of the architecture tries to close; bootstrap's first real job (once the artefact plane exists) is to establish trust before executing anything it fetched.
 
-Today the scripts live only in the source repo and are copied onto the device by the developer during bring-up. Signature discipline for scripts is deferred until the broader signing tool and key management are chosen (see section 14).
+Today the scripts live only in the source repo and are copied onto the device by the developer during bring-up. Signature discipline for scripts lands when the broader signing tool and key management are chosen (see section 14).
 
 ## 4. Prerequisites: workstation
 
@@ -97,7 +97,7 @@ Required software:
     ```
     `cross` requires Docker or Podman installed and running.
 -   `ssh` and `scp` (or `rsync`). For placing bytes on the Pi.
--   A signing tool and the vendor's private signing key. Exact tool deferred (see section 14).
+-   A signing tool and the vendor's private signing key. Exact tool lands when chosen (see section 14).
 
 Clone the three repos to a shared parent directory:
 
@@ -184,13 +184,13 @@ For each piece (the steward, each plugin, the catalogue, branding, public trust 
 
 ### 6.5 Sign
 
-Produce a detached signature per piece using the vendor's private signing key. The signature asserts "this version was produced by the vendor and has not been tampered with". Specific tool and format deferred (see section 14 and `SHOWCASE.md` section 10).
+Produce a detached signature per piece using the vendor's private signing key. The signature asserts "this version was produced by the vendor and has not been tampered with". Specific tool and format land when chosen (see section 14 and `SHOWCASE.md` section 10).
 
 ### 6.6 Write the artefact manifest
 
 A single file on the artefacts repo that names every piece, version, path, digest, signature, Debian dependencies, and per-channel pointers (which version is currently on `dev` / `test` / `prod`). Signed with the vendor's key. Carries a freshness timestamp.
 
-Format deferred; see section 14.
+Format lands when chosen; see section 14.
 
 ### 6.7 Publish to the artefacts repo
 
@@ -236,7 +236,7 @@ sudo mkdir -p /etc/evo /etc/evo/plugins.d /etc/evo/trust.d
 sudo mkdir -p /var/lib/evo/state /var/lib/evo/cache
 ```
 
-Ownership and permissions per the distribution's service-user decision (deferred).
+Ownership and permissions per the distribution's service-user decision (lands when the decision is made).
 
 ### 7.3 Install the vendor's public trust material
 
@@ -252,7 +252,7 @@ The trust material is bundled with the distribution and is what every subsequent
 curl -o /tmp/manifest <manifest-url-on-artefacts-repo>
 ```
 
-URL shape deferred (see section 14).
+URL shape lands when chosen (see section 14).
 
 ### 7.5 Verify the manifest signature
 
@@ -320,7 +320,7 @@ Depends on the plugin's declared `hot_reload` policy in its manifest (`evo-core/
 -   `restart`: restart the specific plugin via the steward.
 -   `none`: restart the service: `sudo systemctl restart evo`.
 
-The exact per-plugin reload tool is deferred; today the `none` path (service restart) works for any plugin.
+The exact per-plugin reload tool lands when chosen; today the `none` path (service restart) works for any plugin.
 
 ### 8.3 Verify
 

@@ -1,5 +1,5 @@
 # On code/catalogue changes to main: cross-compile (aarch64), sign-smoke, optional artefact upload.
-# Publishing to foonerd/evo-device-volumio-artefacts is deferred until the artefact manifest and token are wired. See SHOWCASE section 7.
+# Publishing to foonerd/evo-device-volumio-artefacts lands when the artefact manifest and token are wired. See SHOWCASE section 7.
 name: continuous-dev
 
 "on":
