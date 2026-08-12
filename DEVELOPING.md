@@ -398,7 +398,7 @@ Each Volumio sensor plugin emits `Happening::PluginEvent { plugin: "com.volumio.
 
 These payload schemas are part of Volumio's public plugin contract; consumer surfaces (frontend, MQTT bridge) build coalesce configs against them. Volumio's plugin-author guide (separate doc, future) captures the schema versioning rule: payload fields can be added without breaking consumers; renames or removals require a coordinated frontend update.
 
-**Volumio MQTT bridge (planned future release):**
+**Volumio MQTT bridge (planned):**
 
 A future Volumio MQTT bridge plugin will translate the coalesced subscriptions to MQTT topics. Coarse-grained subscriptions (per-subject, per-handle) become low-frequency MQTT publishes; fine-grained subscriptions (forensic, per-individual-fire) stay on the Unix-socket path. The bridge declares its own coalesce configs per topic; the framework's per-subscriber coalescing means the bridge's downstream rate is decoupled from the bus's emission rate.
 
@@ -448,7 +448,7 @@ The plugin code (`org.evoframework.playback.mpd`) speaks the MPD wire protocol t
 
 This is the warden-architecture-pattern in action: the resource owner (`mpd.service`) outlives the reloadable plugin code (`org.evoframework.playback.mpd` plugin process). Live mode + framework-side state handover would not be needed even if the framework supported it; the architecture handles preservation outside the framework's hot-reload primitive.
 
-**For the planned com.volumio.composition.alsa (future release):**
+**For the planned com.volumio.composition.alsa:**
 
 Volumio plans a separate ALSA-management daemon (`volumio-alsa-bridge`, systemd-managed) that owns the multi-stream ALSA pipeline state. The composition plugin in evo-core speaks a per-vendor wire protocol to this bridge daemon; plugin reload (Restart) reconnects without disturbing the live pipeline. Same warden-architecture-pattern.
 
@@ -569,7 +569,7 @@ When Volumio's vendor catalogue introduces a subject-type rename or split — fo
 | --- | --- | --- |
 | Frontend "now-migrating" indicator | `variants: ["grammar_migration_progress"]` filtered by current `migration_id` | None (per-batch is already the right granularity) |
 | Frontend completed-counter widget | `variants: ["subject_migrated"]` | `["variant", "from_type", "to_type", "migration_id"]` (collapses to one event per from_type/to_type pair) |
-| Future MQTT bridge (planned future release) | `variants: ["grammar_migration_progress"]` only | `["variant", "migration_id"]` (one event per migration regardless of batch count) |
+| Future MQTT bridge (planned) | `variants: ["grammar_migration_progress"]` only | `["variant", "migration_id"]` (one event per migration regardless of batch count) |
 | Audit log (forensic) | `variants: ["subject_migrated"]` | None — every per-subject event preserved at fidelity |
 
 **Volumio's `pending_grammar_orphans` boot-time observability:**
@@ -657,7 +657,7 @@ If a Volumio catalogue update tightens cardinality and operator opts into `allow
 
 **Volumio's reload monitoring dashboard:**
 
-Future Volumio MQTT bridge (planned future release) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
+Future Volumio MQTT bridge (planned) translates `CatalogueReloaded` / `ManifestReloaded` happenings to MQTT topics under `volumio/system/reload/...`, letting external monitoring (Home Assistant, Grafana with MQTT exporter) track catalogue and manifest version changes across a fleet of Volumio devices. The bridge declares per-topic coalesce configs: `catalogue_reloaded` is one MQTT publish per device per reload; `manifest_reloaded` is one publish per plugin per reload.
 
 ### Catalogue schemas — Volumio specifics
 

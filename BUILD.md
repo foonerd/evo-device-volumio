@@ -49,7 +49,7 @@ Three families of automation exist. Each has one concern.
 Run on the Pi. Source under `scripts/device/` in this repository. Shipped to devices as pieces on the artefact plane once the first release cuts.
 
 -   `bootstrap.sh` - blank Pi to running evo service, one command. Takes a channel as input. Absorbs sections 7.1 through 7.10.
-    Today: skeleton. Phase 4 (footprint creation) runs fully; phase 5 (trust material install) runs when `--trust-key` is passed; phases 3 and 6 onward print PENDING markers naming what each needs.
+    Today: skeleton. Step 4 (footprint creation) runs fully; step 5 (trust material install) runs when `--trust-key` is passed; steps 3 and 6 onward print PENDING markers naming what each needs.
 -   `reset.sh` - wipes the evo footprint cleanly. Optional `--keep-policy` preserves `/etc/evo`. Removes the systemd unit if present.
     Today: fully working. Safe to run on a Pi that has no evo installed (phases skip cleanly).
 -   `update.sh` - CHECK / OFFER / APPLY on a running device. Absorbs sections 9, 10.

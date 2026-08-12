@@ -22,11 +22,11 @@
 #   13. Print status and next steps.
 #
 # Today's state:
-#   Phase 4 runs fully (creates the footprint).
-#   Phase 5 runs if --trust-key is provided.
-#   Phase 3 runs apt-get update as a baseline but has no plugin deps to install yet.
-#   Phases 6 through 12 are pending and print PENDING markers naming what they need.
-#   Milestone 3 onward populates those phases.
+#   Step 4 runs fully (creates the footprint).
+#   Step 5 runs if --trust-key is provided.
+#   Step 3 runs apt-get update as a baseline but has no plugin deps to install yet.
+#   Steps 6 through 12 are pending and print PENDING markers naming what they need.
+#   Later milestones populate those steps.
 #
 # Idempotent: safe to re-run. Footprint directories are created with install -d;
 # trust keys overwrite cleanly.
