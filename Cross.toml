@@ -1,13 +1,32 @@
 # cross (https://github.com/cross-rs/cross) — see scripts/workstation/Makefile
 #
-# The workspace depends on a sibling foonerd/evo-core checkout via
-#   evo-plugin-sdk = { path = "../evo-core/crates/evo-plugin-sdk" }
-# That tree must be visible in the build container at the same absolute path
-# as on the host. The Makefile sets EVO_CORE to the resolved EVO_CORE_PATH
-# and exports it for `cross build`.
+# ## Base image: debian:trixie
+#
+# `cross-images/aarch64-unknown-linux-gnu/Dockerfile` pins the
+# base to `debian:trixie` — matching the target Volumio
+# device's runtime OS + package universe — so build-time
+# libasound2-dev links against the same symbol version and
+# vendor patch level the runtime dynamic loader presents.
+# Cross-rs's default `ghcr.io/cross-rs/*:main` images resolve
+# to Ubuntu 20.04 focal; libasound2 happens to be safe across
+# vendor drift but the discipline break is real. Sister repos
+# evo-device-audio + evo-kiosk-eng carry the same
+# dockerfile.file → debian:trixie pattern.
+#
+# ## Path-dep workspace-root visibility
+#
+# The workspace depends on a sibling foonerd/evo-core checkout
+# via `evo-plugin-sdk = { path = "../evo-core/crates/evo-plugin-sdk" }`.
+# That tree must be visible in the build container at the same
+# absolute path as on the host. `scripts/workstation/Makefile`
+# sets EVO_CORE to the resolved EVO_CORE_PATH and exports it
+# for `cross build`.
 
 [build.env]
 volumes = ["EVO_CORE"]
+
+[target.aarch64-unknown-linux-gnu]
+dockerfile.file = "cross-images/aarch64-unknown-linux-gnu/Dockerfile"
 
 [target.aarch64-unknown-linux-gnu.env]
 volumes = ["EVO_CORE"]
